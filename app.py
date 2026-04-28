@@ -78,7 +78,27 @@ def get_managed_users_df():
         return pd.DataFrame()
 
     users_wks = sh.worksheet("Users")
-    return pd.DataFrame(users_wks.get_all_records())
+    df = pd.DataFrame(users_wks.get_all_records())
+    if df.empty:
+        return df
+
+    # Normalize column names to avoid issues from spaces/case variations.
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # Ensure expected columns always exist.
+    for col in ["Username", "Password", "Role", "Full_Name", "Phone", "Created_At", "Sheet_Name"]:
+        if col not in df.columns:
+            df[col] = ""
+
+    # Normalize values used for matching/display.
+    df["Username"] = df["Username"].astype(str).str.strip().str.lower()
+    df["Password"] = df["Password"].astype(str).str.strip()
+    df["Role"] = df["Role"].astype(str).str.strip().str.lower()
+    df["Full_Name"] = df["Full_Name"].astype(str).str.strip()
+    df["Phone"] = df["Phone"].astype(str).str.strip()
+    df["Sheet_Name"] = df["Sheet_Name"].astype(str).str.strip()
+
+    return df
 
 
 def authenticate_staff_user(username, password):
@@ -97,10 +117,6 @@ def authenticate_staff_user(username, password):
         if "Username" not in df_users.columns or "Password" not in df_users.columns or "Role" not in df_users.columns:
             return None
 
-        # Ensure Full_Name column exists for backward compatibility
-        if "Full_Name" not in df_users.columns:
-            df_users["Full_Name"] = ""
-
         matched = df_users[
             (
                 (df_users["Username"].astype(str).str.strip().str.lower() == username)
@@ -111,8 +127,10 @@ def authenticate_staff_user(username, password):
         if matched.empty:
             return None
 
-        role = str(matched.iloc[0]["Role"]).strip()
-        if role not in ["Assistant", "Teacher"]:
+        role_raw = str(matched.iloc[0]["Role"]).strip().lower()
+        role_map = {"assistant": "Assistant", "teacher": "Teacher"}
+        role = role_map.get(role_raw, "")
+        if role == "":
             return None
 
         canonical_username = str(matched.iloc[0].get("Username", "")).strip().lower()
@@ -200,10 +218,16 @@ def admin_page():
             try:
                 df_users = get_managed_users_df()
                 if not df_users.empty:
-                    staff_df = df_users[df_users["Role"].astype(str).isin(["Teacher", "Assistant"])]
+                    staff_df = df_users[df_users["Role"].astype(str).str.lower().isin(["teacher", "assistant"])]
                     if not staff_df.empty:
+                        staff_df = staff_df.copy()
+                        staff_df["Role"] = staff_df["Role"].str.lower().map({"teacher": "Teacher", "assistant": "Assistant"}).fillna(staff_df["Role"])
                         st.subheader("الحسابات الحالية")
                         st.dataframe(staff_df[["Username", "Role", "Full_Name", "Phone", "Sheet_Name"]], use_container_width=True)
+                    else:
+                        st.info("لا توجد حسابات مدرسين/مساعدين حتى الآن.")
+                else:
+                    st.info("شيت Users فارغ حاليًا.")
             except Exception as e:
                 st.error(f"خطأ في تحميل المستخدمين: {str(e)}")
 
@@ -231,7 +255,7 @@ def admin_page():
                         df_users = get_managed_users_df()
 
                         if not df_users.empty and "Username" in df_users.columns:
-                            username_exists = (df_users["Username"].astype(str).str.strip().str.lower() == username_clean).any()
+                            username_exists = (df_users["Username"] == username_clean).any()
                         else:
                             username_exists = False
 
@@ -249,6 +273,7 @@ def admin_page():
                                 sheet_name
                             ])
                             st.success(f"تم إنشاء حساب {role_choice} بنجاح وإنشاء الشيت: {sheet_name}")
+                            st.rerun()
                     except Exception as e:
                         st.error(f"خطأ في إنشاء الحساب: {str(e)}")
 
