@@ -72,37 +72,54 @@ def send_wa(phone, msg):
 
 # --- واجهات المستخدم ---
 
-def admin_page():
-    st.title("👨‍💼 لوحة تحكم الأدمن")
-    tab1, tab2 = st.tabs(["إدارة المستخدمين", "التقارير العامة"])
-    with tab1:
-        st.info("هنا يمكنك إضافة مدرسين جدد أو مساعدين (قيد التطوير)")
-
-def assistant_page():
-    st.title("👩‍💻 لوحة تحكم المساعد (Assistant)")
-    
+def render_add_student_form(form_key, default_teacher=""):
     with st.expander("➕ إضافة طالب جديد"):
-        with st.form("add_student"):
+        with st.form(form_key):
             name = st.text_input("اسم الطالب")
             phone = st.text_input("رقم تليفون الطالب")
             p_phone = st.text_input("رقم ولي الأمر")
             round_choice = st.selectbox("اختار الـ Round", list(ROUNDS_CONFIG.keys()))
-            teacher = st.text_input("اسم المدرس")
+            teacher = st.text_input("اسم المدرس", value=default_teacher)
             price_status = st.selectbox("حالة الدفع", ["مدفوع", "غير مدفوع"])
-            
+
             if st.form_submit_button("تسجيل الطالب"):
-                if not db_connected or sh is None:
+                if not name.strip() or not phone.strip() or not p_phone.strip() or not teacher.strip():
+                    st.error("يرجى إدخال جميع البيانات المطلوبة.")
+                elif not db_connected or sh is None:
                     st.error("قاعدة البيانات غير متصلة. لا يمكن تسجيل الطالب.")
                 else:
                     try:
                         wks = sh.worksheet("Students")
-                        wks.append_row([name, phone, p_phone, round_choice, ROUNDS_CONFIG[round_choice]['total'], teacher, price_status, str(datetime.now().date())])
-                        st.success(f"تم تسجيل {name} بنجاح!")
+                        wks.append_row([
+                            name.strip(),
+                            phone.strip(),
+                            p_phone.strip(),
+                            round_choice,
+                            ROUNDS_CONFIG[round_choice]['total'],
+                            teacher.strip(),
+                            price_status,
+                            str(datetime.now().date())
+                        ])
+                        st.success(f"تم تسجيل {name.strip()} بنجاح!")
                     except Exception as e:
                         st.error(f"خطأ في تسجيل الطالب: {str(e)}")
 
+def admin_page():
+    st.title("👨‍💼 لوحة تحكم الأدمن")
+    tab1, tab2 = st.tabs(["إدارة المستخدمين", "التقارير العامة"])
+    with tab1:
+        st.info("يمكنك الآن إضافة طلاب جدد من لوحة الأدمن")
+        render_add_student_form("add_student_admin")
+
+def assistant_page():
+    st.title("👩‍💻 لوحة تحكم المساعد (Assistant)")
+    render_add_student_form("add_student_assistant")
+
 def teacher_page():
     st.title("👨‍🏫 لوحة تحكم المدرس")
+    teacher_name = st.session_state.get("username", "teacher")
+    render_add_student_form("add_student_teacher", default_teacher=teacher_name)
+
     try:
         if not db_connected or sh is None:
             st.warning("قاعدة البيانات غير متصلة. لا يمكن استرجاع بيانات الطلاب.")
@@ -112,7 +129,7 @@ def teacher_page():
         df = pd.DataFrame(wks.get_all_records())
         
         if df.empty:
-            st.info("لا توجد طلاب مسجلين حالياً. يرجى إضافة طلاب من خلال قائمة المساعد.")
+            st.info("لا توجد طلاب مسجلين حالياً. يمكنك إضافة طالب جديد من الأعلى.")
             return
         
         student_list = df['Name'].tolist()
@@ -185,20 +202,24 @@ def main():
         if st.button("دخول"):
             if user == "admin" and pwd == "mca2026": # بيانات الأدمن
                 st.session_state.role = "Admin"
+                st.session_state.username = user
                 st.session_state.authenticated = True
                 st.rerun()
             elif user == "assistant" and pwd == "mca_asst": # بيانات المساعد
                 st.session_state.role = "Assistant"
+                st.session_state.username = user
                 st.session_state.authenticated = True
                 st.rerun()
             elif user == "teacher" and pwd == "mca_teacher": # بيانات المدرس
                 st.session_state.role = "Teacher"
+                st.session_state.username = user
                 st.session_state.authenticated = True
                 st.rerun()
             else:
                 # محاولة دخول كولي أمر (الرقم هو اليوزر والباسورد)
                 if user == pwd and len(user) >= 10:
                     st.session_state.role = "Parent"
+                    st.session_state.username = user
                     st.session_state.user_phone = user
                     st.session_state.authenticated = True
                     st.rerun()
