@@ -97,19 +97,31 @@ def authenticate_staff_user(username, password):
         if "Username" not in df_users.columns or "Password" not in df_users.columns or "Role" not in df_users.columns:
             return None
 
+        # Ensure Full_Name column exists for backward compatibility
+        if "Full_Name" not in df_users.columns:
+            df_users["Full_Name"] = ""
+
         matched = df_users[
-            (df_users["Username"].astype(str).str.strip().str.lower() == username)
+            (
+                (df_users["Username"].astype(str).str.strip().str.lower() == username)
+                | (df_users["Full_Name"].astype(str).str.strip().str.lower() == username)
+            )
             & (df_users["Password"].astype(str).str.strip() == password)
         ]
         if matched.empty:
             return None
 
-        role = str(matched.iloc[0]["Role"])
+        role = str(matched.iloc[0]["Role"]).strip()
         if role not in ["Assistant", "Teacher"]:
             return None
 
+        canonical_username = str(matched.iloc[0].get("Username", "")).strip().lower()
         full_name = str(matched.iloc[0].get("Full_Name", "")).strip()
-        return {"role": role, "display_name": full_name or username}
+        return {
+            "role": role,
+            "username": canonical_username or username,
+            "display_name": full_name or canonical_username or username
+        }
     except:
         return None
 
@@ -356,7 +368,7 @@ def main():
                 staff_auth = authenticate_staff_user(user, pwd)
                 if staff_auth is not None:
                     st.session_state.role = staff_auth["role"]
-                    st.session_state.username = user
+                    st.session_state.username = staff_auth["username"]
                     st.session_state.display_name = staff_auth["display_name"]
                     st.session_state.authenticated = True
                     st.rerun()
