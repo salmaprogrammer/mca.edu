@@ -7,10 +7,16 @@ import re
 
 USERS_HEADERS = ["Username", "Password", "Role", "Full_Name", "Phone", "Created_At", "Sheet_Name"]
 
+
+def is_quota_error(err):
+    msg = str(err)
+    return "429" in msg or "Quota exceeded" in msg
+
 # --- إعدادات الصفحة ---
 st.set_page_config(page_title="MCA Academy System", layout="wide", initial_sidebar_state="expanded")
 
 # --- الاتصال بـ Google Sheets عبر Secrets ---
+@st.cache_resource
 def init_connection():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     # سيتم قراءة البيانات من سكرت استريم ليت للحماية
@@ -83,6 +89,15 @@ def create_role_sheet_if_missing(role, username):
     return sheet_title
 
 
+@st.cache_data(ttl=45, show_spinner=False)
+def get_sheet_records(sheet_name):
+    """Cache worksheet reads briefly to reduce Google Sheets quota usage."""
+    if not db_connected or sh is None:
+        return []
+    wks = sh.worksheet(sheet_name)
+    return wks.get_all_records()
+
+
 def get_managed_users_df():
     if not db_connected or sh is None:
         return pd.DataFrame()
@@ -91,7 +106,9 @@ def get_managed_users_df():
 
     # Prefer safe explicit headers in case worksheet header row is malformed.
     try:
-        records = users_wks.get_all_records(expected_headers=USERS_HEADERS)
+        records = get_sheet_records("Users")
+        if not records:
+            records = users_wks.get_all_records(expected_headers=USERS_HEADERS)
     except:
         records = []
 
@@ -173,11 +190,20 @@ try:
     gc = init_connection()
     # تأكد أنك أنشأت ملف بهذا الاسم وشاركته مع الايميل البرمجي
     sh = gc.open_by_key(SPREADSHEET_ID)
-    ensure_sheets_initialized(sh)
+    if "sheets_initialized" not in st.session_state:
+        st.session_state.sheets_initialized = False
+
+    if not st.session_state.sheets_initialized:
+        ensure_sheets_initialized(sh)
+        st.session_state.sheets_initialized = True
+
     st.sidebar.success("✅ متصل بقاعدة البيانات")
     db_connected = True
 except Exception as e:
-    st.sidebar.error(f"❌ فشل الاتصال بقاعدة البيانات: {str(e)}")
+    if is_quota_error(e):
+        st.sidebar.warning("⚠️ تم تجاوز حد القراءة المؤقت في Google Sheets. انتظر دقيقة ثم أعد المحاولة.")
+    else:
+        st.sidebar.error(f"❌ فشل الاتصال بقاعدة البيانات: {str(e)}")
     db_connected = False
     # Don't stop - allow app to continue without database
     sh = None
@@ -239,6 +265,7 @@ def render_add_student_form(form_key, default_teacher=""):
                             price_status,
                             str(datetime.now().date())
                         ])
+                        st.cache_data.clear()
                         st.success(f"تم تسجيل {name.strip()} بنجاح!")
                     except Exception as e:
                         st.error(f"خطأ في تسجيل الطالب: {str(e)}")
@@ -308,6 +335,7 @@ def admin_page():
                                 str(datetime.now()),
                                 sheet_name
                             ])
+                            st.cache_data.clear()
                             st.success(f"تم إنشاء حساب {role_choice} بنجاح وإنشاء الشيت: {sheet_name}")
                             st.rerun()
                     except Exception as e:
@@ -330,8 +358,7 @@ def teacher_page():
             st.warning("قاعدة البيانات غير متصلة. لا يمكن استرجاع بيانات الطلاب.")
             return
         
-        wks = sh.worksheet("Students")
-        df = pd.DataFrame(wks.get_all_records())
+        df = pd.DataFrame(get_sheet_records("Students"))
         
         if df.empty:
             st.info("لا توجد طلاب مسجلين حالياً. يمكنك إضافة طالب جديد من الأعلى.")
@@ -352,6 +379,7 @@ def teacher_page():
             # تسجيل في شيت Attendance
             att_wks = sh.worksheet("Attendance")
             att_wks.append_row([selected_student, str(datetime.now()), status, grade, homework])
+            st.cache_data.clear()
             
             # تجهيز رابط واتساب
             student_row = df[df['Name'] == selected_student].iloc[0]
@@ -370,7 +398,7 @@ def parent_student_page(user_phone):
             return
         
         # البحث في شيت الطلاب برقم التليفون
-        df_students = pd.DataFrame(sh.worksheet("Students").get_all_records())
+        df_students = pd.DataFrame(get_sheet_records("Students"))
         if df_students.empty:
             st.warning("لا توجد بيانات طلاب حالياً.")
             return
@@ -398,7 +426,7 @@ def parent_student_page(user_phone):
             st.metric("الحصص المتبقية في الراوند", student_info.iloc[0]['Sessions'])
             
             # عرض درجاته من شيت Attendance
-            df_att = pd.DataFrame(sh.worksheet("Attendance").get_all_records())
+            df_att = pd.DataFrame(get_sheet_records("Attendance"))
             personal_att = df_att[df_att['Student_Name'] == s_name]
             if not personal_att.empty:
                 st.table(personal_att)
