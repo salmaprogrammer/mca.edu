@@ -5,6 +5,8 @@ import pandas as pd
 from datetime import datetime
 import re
 
+USERS_HEADERS = ["Username", "Password", "Role", "Full_Name", "Phone", "Created_At", "Sheet_Name"]
+
 # --- إعدادات الصفحة ---
 st.set_page_config(page_title="MCA Academy System", layout="wide", initial_sidebar_state="expanded")
 
@@ -43,11 +45,19 @@ def ensure_sheets_initialized(sheet):
 
     try:
         # Try to get Users sheet
-        sheet.worksheet("Users")
+        ws = sheet.worksheet("Users")
+        current_headers = [str(h).strip() for h in ws.row_values(1)]
+        headers_invalid = (
+            len(current_headers) < len(USERS_HEADERS)
+            or any(h == "" for h in current_headers[:len(USERS_HEADERS)])
+            or len(set(current_headers[:len(USERS_HEADERS)])) != len(current_headers[:len(USERS_HEADERS)])
+        )
+        if headers_invalid:
+            ws.update("A1:G1", [USERS_HEADERS])
     except:
         # Create Users sheet if it doesn't exist
         ws = sheet.add_worksheet(title="Users", rows=1, cols=7)
-        ws.append_row(["Username", "Password", "Role", "Full_Name", "Phone", "Created_At", "Sheet_Name"])
+        ws.append_row(USERS_HEADERS)
 
 
 def make_safe_sheet_title(prefix, username):
@@ -78,7 +88,21 @@ def get_managed_users_df():
         return pd.DataFrame()
 
     users_wks = sh.worksheet("Users")
-    df = pd.DataFrame(users_wks.get_all_records())
+
+    # Prefer safe explicit headers in case worksheet header row is malformed.
+    try:
+        records = users_wks.get_all_records(expected_headers=USERS_HEADERS)
+    except:
+        records = []
+
+    # If still empty, try normal read as fallback.
+    if not records:
+        try:
+            records = users_wks.get_all_records()
+        except:
+            records = []
+
+    df = pd.DataFrame(records)
     if df.empty:
         return df
 
@@ -86,7 +110,7 @@ def get_managed_users_df():
     df.columns = [str(c).strip() for c in df.columns]
 
     # Ensure expected columns always exist.
-    for col in ["Username", "Password", "Role", "Full_Name", "Phone", "Created_At", "Sheet_Name"]:
+    for col in USERS_HEADERS:
         if col not in df.columns:
             df[col] = ""
 
