@@ -260,6 +260,20 @@ def get_teacher_directory():
 
     return directory
 
+
+def get_student_name_options(df_students):
+    """Build clean student-name-only options for UI dropdowns."""
+    if df_students.empty or "Name" not in df_students.columns:
+        return []
+
+    names = (
+        df_students["Name"]
+        .astype(str)
+        .str.strip()
+    )
+    names = names[names != ""]
+    return sorted(names.unique().tolist())
+
 # --- واجهات المستخدم ---
 
 def render_add_student_form(form_key):
@@ -317,7 +331,11 @@ def render_delete_student_section(section_key):
             st.info("لا توجد بيانات طلاب متاحة للحذف.")
             return
 
-        student_names = sorted(df_students["Name"].astype(str).str.strip().tolist())
+        student_names = get_student_name_options(df_students)
+        if not student_names:
+            st.info("لا توجد أسماء طلاب صالحة متاحة للحذف.")
+            return
+
         selected_name = st.selectbox("اختر الطالب للحذف", student_names, key=f"{section_key}_student")
         confirm_delete = st.checkbox("تأكيد الحذف", key=f"{section_key}_confirm")
 
@@ -468,8 +486,12 @@ def teacher_page():
         if teacher_students.empty:
             st.info("لا يوجد طلاب مضافون لك حالياً.")
             return
-        
-        student_list = teacher_students['Name'].astype(str).tolist()
+
+        student_list = get_student_name_options(teacher_students)
+        if not student_list:
+            st.info("لا توجد أسماء طلاب صالحة مضافة لك حالياً.")
+            return
+
         selected_student = st.selectbox("اختر الطالب لتسجيل الغياب والدرجات", student_list)
         
         col1, col2 = st.columns(2)
