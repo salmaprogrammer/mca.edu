@@ -6,11 +6,55 @@ from datetime import datetime
 import re
 
 USERS_HEADERS = ["Username", "Password", "Role", "Full_Name", "Phone", "Created_At", "Sheet_Name"]
+STUDENTS_HEADERS = [
+    "Name", "Phone", "Parent_Phone", "Round", "Start_date", "Total_Sessions",
+    "Completed_Sessions", "Remaining_Sessions", "Teacher", "Payment_Status", "Date_Registered",
+    "Last_Status", "Last_Homework_Status", "Last_Exam_Grade", "Last_Session_Date", "Absent_Count"
+]
+ATTENDANCE_HEADERS = [
+    "Student_Name", "Session_Date", "Status", "Homework", "Homework_Status",
+    "Exam_Grade", "Notes", "Recorded_By", "Recorded_Role"
+]
 
 
 def is_quota_error(err):
     msg = str(err)
     return "429" in msg or "Quota exceeded" in msg
+
+
+def parse_date_safe(value):
+    if isinstance(value, datetime):
+        return value.date()
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+
+    for fmt in ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"]:
+        try:
+            return datetime.strptime(text, fmt).date()
+        except:
+            continue
+    return None
+
+
+def calculate_sessions(round_choice, start_date_value):
+    total = int(ROUNDS_CONFIG.get(round_choice, {}).get("total", 0))
+    per_week = int(ROUNDS_CONFIG.get(round_choice, {}).get("per_week", 1))
+
+    start_date = parse_date_safe(start_date_value)
+    if start_date is None:
+        return total, 0, total
+
+    today = datetime.now().date()
+    if start_date > today:
+        return total, 0, total
+
+    elapsed_days = (today - start_date).days
+    elapsed_weeks = (elapsed_days // 7) + 1
+    completed = min(total, max(0, elapsed_weeks * per_week))
+    remaining = max(0, total - completed)
+    return total, completed, remaining
 
 # --- إعدادات الصفحة ---
 st.set_page_config(page_title="MCA Academy System", layout="wide", initial_sidebar_state="expanded")
@@ -35,19 +79,35 @@ def ensure_sheets_initialized(sheet):
     """Ensure all required worksheets exist with proper headers"""
     try:
         # Try to get Students sheet
-        sheet.worksheet("Students")
+        ws = sheet.worksheet("Students")
+        current_headers = [str(h).strip() for h in ws.row_values(1)]
+        headers_invalid = (
+            len(current_headers) < len(STUDENTS_HEADERS)
+            or any(h == "" for h in current_headers[:len(STUDENTS_HEADERS)])
+            or len(set(current_headers[:len(STUDENTS_HEADERS)])) != len(current_headers[:len(STUDENTS_HEADERS)])
+        )
+        if headers_invalid:
+            ws.update(f"A1:P1", [STUDENTS_HEADERS])
     except:
         # Create Students sheet if it doesn't exist
-        ws = sheet.add_worksheet(title="Students", rows=1, cols=8)
-        ws.append_row(["Name", "Phone", "Parent_Phone", "Round", "Sessions", "Teacher", "Payment_Status", "Date_Registered"])
+        ws = sheet.add_worksheet(title="Students", rows=1, cols=len(STUDENTS_HEADERS))
+        ws.append_row(STUDENTS_HEADERS)
     
     try:
         # Try to get Attendance sheet
-        sheet.worksheet("Attendance")
+        ws = sheet.worksheet("Attendance")
+        current_headers = [str(h).strip() for h in ws.row_values(1)]
+        headers_invalid = (
+            len(current_headers) < len(ATTENDANCE_HEADERS)
+            or any(h == "" for h in current_headers[:len(ATTENDANCE_HEADERS)])
+            or len(set(current_headers[:len(ATTENDANCE_HEADERS)])) != len(current_headers[:len(ATTENDANCE_HEADERS)])
+        )
+        if headers_invalid:
+            ws.update("A1:I1", [ATTENDANCE_HEADERS])
     except:
         # Create Attendance sheet if it doesn't exist
-        ws = sheet.add_worksheet(title="Attendance", rows=1, cols=5)
-        ws.append_row(["Student_Name", "Date", "Status", "Grade", "Homework"])
+        ws = sheet.add_worksheet(title="Attendance", rows=1, cols=len(ATTENDANCE_HEADERS))
+        ws.append_row(ATTENDANCE_HEADERS)
 
     try:
         # Try to get Users sheet
@@ -274,6 +334,112 @@ def get_student_name_options(df_students):
     names = names[names != ""]
     return sorted(names.unique().tolist())
 
+
+def get_students_df():
+    if not db_connected or sh is None:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(get_sheet_records("Students"))
+    if df.empty:
+        return df
+
+    for col in STUDENTS_HEADERS:
+        if col not in df.columns:
+            df[col] = ""
+
+    df["Name"] = df["Name"].astype(str).str.strip()
+    df["Teacher"] = df["Teacher"].astype(str).str.strip().str.lower()
+    df["Round"] = df["Round"].astype(str).str.strip()
+    df["Start_date"] = df["Start_date"].astype(str).str.strip()
+
+    # Keep sessions counters aligned with Round + Start_date even for old rows.
+    totals = []
+    completed = []
+    remaining = []
+    for _, row in df.iterrows():
+        t, c, r = calculate_sessions(row.get("Round", ""), row.get("Start_date", ""))
+        totals.append(t)
+        completed.append(c)
+        remaining.append(r)
+
+    df["Total_Sessions"] = totals
+    df["Completed_Sessions"] = completed
+    df["Remaining_Sessions"] = remaining
+
+    return df
+
+
+def render_session_tracking(df_students, key_prefix, role_label):
+    st.subheader("متابعة السيشن")
+
+    student_list = get_student_name_options(df_students)
+    if not student_list:
+        st.info("لا توجد أسماء طلاب صالحة للمتابعة.")
+        return
+
+    selected_student = st.selectbox("اختر الطالب", student_list, key=f"{key_prefix}_student")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        status = st.radio("الحالة", ["حاضر", "غائب"], key=f"{key_prefix}_status")
+        homework_status = st.selectbox("حالة الواجب", ["سلم", "لم يسلم"], key=f"{key_prefix}_hw_status")
+    with col2:
+        homework = st.text_area("الواجب", key=f"{key_prefix}_homework")
+        exam_grade = st.number_input("درجة الامتحان (0-100)", min_value=0, max_value=100, step=1, key=f"{key_prefix}_exam_grade")
+
+    notes = st.text_area("ملاحظات", key=f"{key_prefix}_notes")
+
+    if st.button("حفظ بيانات السيشن", key=f"{key_prefix}_save"):
+        try:
+            att_wks = sh.worksheet("Attendance")
+            att_wks.append_row([
+                selected_student,
+                str(datetime.now()),
+                status,
+                homework.strip(),
+                homework_status,
+                int(exam_grade),
+                notes.strip(),
+                st.session_state.get("username", ""),
+                role_label
+            ])
+
+            # Update latest student status summary columns in Students sheet.
+            students_wks = sh.worksheet("Students")
+            all_values = students_wks.get_all_values()
+            if all_values:
+                headers = [str(h).strip() for h in all_values[0]]
+                name_idx = headers.index("Name") if "Name" in headers else -1
+                if name_idx >= 0:
+                    for row_idx, row in enumerate(all_values[1:], start=2):
+                        row_name = row[name_idx].strip() if name_idx < len(row) else ""
+                        if row_name == selected_student:
+                            col_map = {h: i + 1 for i, h in enumerate(headers)}
+                            absent_idx = col_map.get("Absent_Count")
+                            prev_absent = 0
+                            if absent_idx and absent_idx - 1 < len(row):
+                                prev_text = str(row[absent_idx - 1]).strip()
+                                prev_absent = int(prev_text) if prev_text.isdigit() else 0
+
+                            updates = {
+                                "Last_Status": status,
+                                "Last_Homework_Status": homework_status,
+                                "Last_Exam_Grade": str(int(exam_grade)),
+                                "Last_Session_Date": str(datetime.now().date()),
+                                "Absent_Count": str(prev_absent + (1 if status == "غائب" else 0))
+                            }
+
+                            for col_name, val in updates.items():
+                                col_idx = col_map.get(col_name)
+                                if col_idx:
+                                    students_wks.update_cell(row_idx, col_idx, val)
+                            break
+
+            st.cache_data.clear()
+            st.success("تم حفظ بيانات السيشن بنجاح")
+        except Exception as e:
+            st.error(f"خطأ أثناء حفظ بيانات السيشن: {str(e)}")
+
 # --- واجهات المستخدم ---
 
 def render_add_student_form(form_key):
@@ -283,6 +449,7 @@ def render_add_student_form(form_key):
             phone = st.text_input("رقم تليفون الطالب")
             p_phone = st.text_input("رقم ولي الأمر")
             round_choice = st.selectbox("اختار الـ Round", list(ROUNDS_CONFIG.keys()))
+            start_date = st.date_input("Start_date (تاريخ البداية)", value=datetime.now().date())
 
             teacher_directory = get_teacher_directory()
             if teacher_directory:
@@ -303,16 +470,25 @@ def render_add_student_form(form_key):
                     st.error("قاعدة البيانات غير متصلة. لا يمكن تسجيل الطالب.")
                 else:
                     try:
+                        total_sessions, completed_sessions, remaining_sessions = calculate_sessions(round_choice, start_date)
                         wks = sh.worksheet("Students")
                         wks.append_row([
                             name.strip(),
                             phone.strip(),
                             p_phone.strip(),
                             round_choice,
-                            ROUNDS_CONFIG[round_choice]['total'],
+                            str(start_date),
+                            total_sessions,
+                            completed_sessions,
+                            remaining_sessions,
                             teacher_username,
                             price_status,
-                            str(datetime.now().date())
+                            str(datetime.now().date()),
+                            "",
+                            "",
+                            "",
+                            "",
+                            0
                         ])
                         st.cache_data.clear()
                         st.success(f"تم تسجيل {name.strip()} بنجاح!")
@@ -326,7 +502,7 @@ def render_delete_student_section(section_key):
             st.error("قاعدة البيانات غير متصلة. لا يمكن حذف الطالب.")
             return
 
-        df_students = pd.DataFrame(get_sheet_records("Students"))
+        df_students = get_students_df()
         if df_students.empty or "Name" not in df_students.columns:
             st.info("لا توجد بيانات طلاب متاحة للحذف.")
             return
@@ -455,6 +631,12 @@ def assistant_page():
     render_add_student_form("add_student_assistant")
     render_delete_student_section("delete_student_assistant")
 
+    df_students = get_students_df()
+    if df_students.empty:
+        st.info("لا توجد بيانات طلاب حالياً للمتابعة.")
+        return
+    render_session_tracking(df_students, "assistant_session", "Assistant")
+
 def teacher_page():
     st.title("👨‍🏫 لوحة تحكم المدرس")
     st.info("يمكنك متابعة وتقييم الطلاب المضافين لك فقط")
@@ -464,7 +646,7 @@ def teacher_page():
             st.warning("قاعدة البيانات غير متصلة. لا يمكن استرجاع بيانات الطلاب.")
             return
 
-        df = pd.DataFrame(get_sheet_records("Students"))
+        df = get_students_df()
         
         if df.empty:
             st.info("لا توجد طلاب مسجلين حالياً.")
@@ -487,33 +669,7 @@ def teacher_page():
             st.info("لا يوجد طلاب مضافون لك حالياً.")
             return
 
-        student_list = get_student_name_options(teacher_students)
-        if not student_list:
-            st.info("لا توجد أسماء طلاب صالحة مضافة لك حالياً.")
-            return
-
-        selected_student = st.selectbox("اختر الطالب لتسجيل الغياب والدرجات", student_list)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            status = st.radio("الحالة", ["حاضر", "غائب"])
-            grade = st.number_input("الدرجة (من 100)", 0, 100)
-        with col2:
-            homework = st.text_area("الواجب المطلوب")
-            hw_status = st.selectbox("هل سلم الواجب السابق؟", ["نعم", "لا"])
-            
-        if st.button("حفظ وإرسال لولي الأمر"):
-            # تسجيل في شيت Attendance
-            att_wks = sh.worksheet("Attendance")
-            att_wks.append_row([selected_student, str(datetime.now()), status, grade, homework])
-            st.cache_data.clear()
-            
-            # تجهيز رابط واتساب
-            student_row = teacher_students[teacher_students['Name'] == selected_student].iloc[0]
-            msg = f"تقرير حصة اليوم للطالب: {selected_student}\nالحالة: {status}\nالدرجة: {grade}\nالواجب: {homework}"
-            
-            st.success("تم الحفظ!")
-            st.markdown(f"[📲 اضغط هنا لإرسال التقرير لولي الأمر عبر واتساب]({send_wa(str(student_row['Parent_Phone']), msg)})")
+        render_session_tracking(teacher_students, "teacher_session", "Teacher")
     except Exception as e:
         st.error(f"خطأ في تحميل بيانات الطلاب: {str(e)}")
 
@@ -550,7 +706,10 @@ def parent_student_page(user_phone):
         if not student_info.empty:
             s_name = student_info.iloc[0]['Name']
             st.header(f"الطالب: {s_name}")
-            st.metric("الحصص المتبقية في الراوند", student_info.iloc[0]['Sessions'])
+            if "Remaining_Sessions" in student_info.columns:
+                st.metric("الحصص المتبقية في الراوند", student_info.iloc[0]['Remaining_Sessions'])
+            else:
+                st.metric("الحصص المتبقية في الراوند", "-")
             
             # عرض درجاته من شيت Attendance
             df_att = pd.DataFrame(get_sheet_records("Attendance"))
