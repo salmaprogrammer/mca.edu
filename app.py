@@ -235,20 +235,55 @@ def normalize_phone(phone):
         p = p[1:]
     return p
 
+
+def get_teacher_directory():
+    """Return teacher accounts for assignment in student creation."""
+    if not db_connected or sh is None:
+        return []
+
+    df_users = get_managed_users_df()
+    if df_users.empty:
+        return []
+
+    teachers = df_users[df_users["Role"] == "teacher"].copy()
+    if teachers.empty:
+        return []
+
+    directory = []
+    for _, row in teachers.iterrows():
+        username = str(row.get("Username", "")).strip().lower()
+        full_name = str(row.get("Full_Name", "")).strip()
+        if not username:
+            continue
+        label = f"{full_name} ({username})" if full_name and full_name.lower() != username else username
+        directory.append({"label": label, "username": username, "full_name": full_name or username})
+
+    return directory
+
 # --- واجهات المستخدم ---
 
-def render_add_student_form(form_key, default_teacher=""):
+def render_add_student_form(form_key):
     with st.expander("➕ إضافة طالب جديد"):
         with st.form(form_key):
             name = st.text_input("اسم الطالب")
             phone = st.text_input("رقم تليفون الطالب")
             p_phone = st.text_input("رقم ولي الأمر")
             round_choice = st.selectbox("اختار الـ Round", list(ROUNDS_CONFIG.keys()))
-            teacher = st.text_input("اسم المدرس", value=default_teacher)
+
+            teacher_directory = get_teacher_directory()
+            if teacher_directory:
+                teacher_labels = [t["label"] for t in teacher_directory]
+                selected_teacher_label = st.selectbox("اسم المدرس", teacher_labels)
+                selected_teacher = next((t for t in teacher_directory if t["label"] == selected_teacher_label), teacher_directory[0])
+                teacher_username = selected_teacher["username"]
+            else:
+                st.warning("لا يوجد مدرسون مضافون بعد. أضف مدرسًا من لوحة الأدمن أولًا.")
+                teacher_username = ""
+
             price_status = st.selectbox("حالة الدفع", ["مدفوع", "غير مدفوع"])
 
             if st.form_submit_button("تسجيل الطالب"):
-                if not name.strip() or not phone.strip() or not p_phone.strip() or not teacher.strip():
+                if not name.strip() or not phone.strip() or not p_phone.strip() or not teacher_username.strip():
                     st.error("يرجى إدخال جميع البيانات المطلوبة.")
                 elif not db_connected or sh is None:
                     st.error("قاعدة البيانات غير متصلة. لا يمكن تسجيل الطالب.")
@@ -261,7 +296,7 @@ def render_add_student_form(form_key, default_teacher=""):
                             p_phone.strip(),
                             round_choice,
                             ROUNDS_CONFIG[round_choice]['total'],
-                            teacher.strip(),
+                            teacher_username,
                             price_status,
                             str(datetime.now().date())
                         ])
@@ -270,12 +305,64 @@ def render_add_student_form(form_key, default_teacher=""):
                     except Exception as e:
                         st.error(f"خطأ في تسجيل الطالب: {str(e)}")
 
+
+def render_delete_student_section(section_key):
+    with st.expander("🗑️ حذف طالب"):
+        if not db_connected or sh is None:
+            st.error("قاعدة البيانات غير متصلة. لا يمكن حذف الطالب.")
+            return
+
+        df_students = pd.DataFrame(get_sheet_records("Students"))
+        if df_students.empty or "Name" not in df_students.columns:
+            st.info("لا توجد بيانات طلاب متاحة للحذف.")
+            return
+
+        student_names = sorted(df_students["Name"].astype(str).str.strip().tolist())
+        selected_name = st.selectbox("اختر الطالب للحذف", student_names, key=f"{section_key}_student")
+        confirm_delete = st.checkbox("تأكيد الحذف", key=f"{section_key}_confirm")
+
+        if st.button("حذف الطالب", key=f"{section_key}_delete"):
+            if not confirm_delete:
+                st.warning("يرجى تأكيد الحذف أولًا.")
+                return
+
+            try:
+                wks = sh.worksheet("Students")
+                values = wks.get_all_values()
+                if not values:
+                    st.warning("شيت الطلاب فارغ.")
+                    return
+
+                headers = [str(h).strip() for h in values[0]]
+                if "Name" not in headers:
+                    st.error("لم يتم العثور على عمود Name في شيت Students.")
+                    return
+
+                name_idx = headers.index("Name")
+                deleted = False
+                for row_idx, row in enumerate(values[1:], start=2):
+                    cell_val = row[name_idx].strip() if name_idx < len(row) else ""
+                    if cell_val == selected_name:
+                        wks.delete_rows(row_idx)
+                        deleted = True
+                        break
+
+                if deleted:
+                    st.cache_data.clear()
+                    st.success(f"تم حذف الطالب: {selected_name}")
+                    st.rerun()
+                else:
+                    st.warning("لم يتم العثور على الطالب للحذف.")
+            except Exception as e:
+                st.error(f"خطأ أثناء حذف الطالب: {str(e)}")
+
 def admin_page():
     st.title("👨‍💼 لوحة تحكم الأدمن")
-    tab1, tab2, tab3 = st.tabs(["إدارة المستخدمين", "إضافة مدرس/مساعد", "التقارير العامة"])
+    tab1, tab2, tab3 = st.tabs(["إدارة الطلاب", "إضافة مدرس/مساعد", "التقارير العامة"])
     with tab1:
-        st.info("يمكنك الآن إضافة طلاب جدد من لوحة الأدمن")
+        st.info("الأدمن يمكنه إضافة وحذف الطلاب")
         render_add_student_form("add_student_admin")
+        render_delete_student_section("delete_student_admin")
 
         if db_connected and sh is not None:
             try:
@@ -346,25 +433,43 @@ def admin_page():
 
 def assistant_page():
     st.title("👩‍💻 لوحة تحكم المساعد (Assistant)")
+    st.info("المساعد يمكنه إضافة وحذف الطلاب")
     render_add_student_form("add_student_assistant")
+    render_delete_student_section("delete_student_assistant")
 
 def teacher_page():
     st.title("👨‍🏫 لوحة تحكم المدرس")
-    teacher_name = st.session_state.get("display_name", st.session_state.get("username", "teacher"))
-    render_add_student_form("add_student_teacher", default_teacher=teacher_name)
+    st.info("يمكنك متابعة وتقييم الطلاب المضافين لك فقط")
 
     try:
         if not db_connected or sh is None:
             st.warning("قاعدة البيانات غير متصلة. لا يمكن استرجاع بيانات الطلاب.")
             return
-        
+
         df = pd.DataFrame(get_sheet_records("Students"))
         
         if df.empty:
-            st.info("لا توجد طلاب مسجلين حالياً. يمكنك إضافة طالب جديد من الأعلى.")
+            st.info("لا توجد طلاب مسجلين حالياً.")
+            return
+
+        if "Teacher" not in df.columns:
+            st.warning("شيت الطلاب لا يحتوي على عمود Teacher بشكل صحيح.")
+            return
+
+        current_username = str(st.session_state.get("username", "")).strip().lower()
+        current_display = str(st.session_state.get("display_name", "")).strip().lower()
+        df["Teacher_norm"] = df["Teacher"].astype(str).str.strip().str.lower()
+
+        teacher_students = df[
+            (df["Teacher_norm"] == current_username)
+            | (df["Teacher_norm"] == current_display)
+        ].copy()
+
+        if teacher_students.empty:
+            st.info("لا يوجد طلاب مضافون لك حالياً.")
             return
         
-        student_list = df['Name'].tolist()
+        student_list = teacher_students['Name'].astype(str).tolist()
         selected_student = st.selectbox("اختر الطالب لتسجيل الغياب والدرجات", student_list)
         
         col1, col2 = st.columns(2)
@@ -382,7 +487,7 @@ def teacher_page():
             st.cache_data.clear()
             
             # تجهيز رابط واتساب
-            student_row = df[df['Name'] == selected_student].iloc[0]
+            student_row = teacher_students[teacher_students['Name'] == selected_student].iloc[0]
             msg = f"تقرير حصة اليوم للطالب: {selected_student}\nالحالة: {status}\nالدرجة: {grade}\nالواجب: {homework}"
             
             st.success("تم الحفظ!")
