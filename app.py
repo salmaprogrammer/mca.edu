@@ -3,6 +3,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 from datetime import datetime
+import re
 
 # --- إعدادات الصفحة ---
 st.set_page_config(page_title="MCA Academy System", layout="wide", initial_sidebar_state="expanded")
@@ -39,6 +40,75 @@ def ensure_sheets_initialized(sheet):
         # Create Attendance sheet if it doesn't exist
         ws = sheet.add_worksheet(title="Attendance", rows=1, cols=5)
         ws.append_row(["Student_Name", "Date", "Status", "Grade", "Homework"])
+
+    try:
+        # Try to get Users sheet
+        sheet.worksheet("Users")
+    except:
+        # Create Users sheet if it doesn't exist
+        ws = sheet.add_worksheet(title="Users", rows=1, cols=7)
+        ws.append_row(["Username", "Password", "Role", "Full_Name", "Phone", "Created_At", "Sheet_Name"])
+
+
+def make_safe_sheet_title(prefix, username):
+    """Google Sheets title rules: remove forbidden chars and cap length."""
+    safe_username = re.sub(r"[\[\]\*\?/\\:]", "_", username.strip())
+    title = f"{prefix}_{safe_username}"
+    return title[:100]
+
+
+def create_role_sheet_if_missing(role, username):
+    if not db_connected or sh is None:
+        return ""
+
+    prefix = "Teacher" if role == "Teacher" else "Assistant"
+    sheet_title = make_safe_sheet_title(prefix, username)
+
+    try:
+        sh.worksheet(sheet_title)
+    except:
+        ws = sh.add_worksheet(title=sheet_title, rows=1, cols=6)
+        ws.append_row(["Timestamp", "Action", "Student_Name", "Details", "Created_By", "Status"])
+
+    return sheet_title
+
+
+def get_managed_users_df():
+    if not db_connected or sh is None:
+        return pd.DataFrame()
+
+    users_wks = sh.worksheet("Users")
+    return pd.DataFrame(users_wks.get_all_records())
+
+
+def authenticate_staff_user(username, password):
+    """Authenticate assistant/teacher accounts stored in Users sheet."""
+    if not db_connected or sh is None:
+        return None
+
+    try:
+        df_users = get_managed_users_df()
+        if df_users.empty:
+            return None
+
+        if "Username" not in df_users.columns or "Password" not in df_users.columns or "Role" not in df_users.columns:
+            return None
+
+        matched = df_users[
+            (df_users["Username"].astype(str) == username)
+            & (df_users["Password"].astype(str) == password)
+        ]
+        if matched.empty:
+            return None
+
+        role = str(matched.iloc[0]["Role"])
+        if role not in ["Assistant", "Teacher"]:
+            return None
+
+        full_name = str(matched.iloc[0].get("Full_Name", "")).strip()
+        return {"role": role, "display_name": full_name or username}
+    except:
+        return None
 
 # محاولة الاتصال وفتح الملف
 SPREADSHEET_ID = "1d0XZZ3ph8bcB2zvz3zKvhcCV3a43w-rlbwsBCG-f0Do"
@@ -106,10 +176,66 @@ def render_add_student_form(form_key, default_teacher=""):
 
 def admin_page():
     st.title("👨‍💼 لوحة تحكم الأدمن")
-    tab1, tab2 = st.tabs(["إدارة المستخدمين", "التقارير العامة"])
+    tab1, tab2, tab3 = st.tabs(["إدارة المستخدمين", "إضافة مدرس/مساعد", "التقارير العامة"])
     with tab1:
         st.info("يمكنك الآن إضافة طلاب جدد من لوحة الأدمن")
         render_add_student_form("add_student_admin")
+
+        if db_connected and sh is not None:
+            try:
+                df_users = get_managed_users_df()
+                if not df_users.empty:
+                    staff_df = df_users[df_users["Role"].astype(str).isin(["Teacher", "Assistant"])]
+                    if not staff_df.empty:
+                        st.subheader("الحسابات الحالية")
+                        st.dataframe(staff_df[["Username", "Role", "Full_Name", "Phone", "Sheet_Name"]], use_container_width=True)
+            except Exception as e:
+                st.error(f"خطأ في تحميل المستخدمين: {str(e)}")
+
+    with tab2:
+        st.info("إنشاء حسابات المدرسين والمساعدين مع إنشاء شيت خاص لكل حساب")
+
+        with st.form("add_staff_user"):
+            role_choice = st.selectbox("نوع الحساب", ["Teacher", "Assistant"])
+            full_name = st.text_input("الاسم الكامل")
+            username = st.text_input("اسم المستخدم")
+            password = st.text_input("كلمة المرور", type="password")
+            phone = st.text_input("رقم الهاتف")
+
+            if st.form_submit_button("إنشاء الحساب"):
+                if not db_connected or sh is None:
+                    st.error("قاعدة البيانات غير متصلة. لا يمكن إنشاء الحساب.")
+                elif not full_name.strip() or not username.strip() or not password.strip():
+                    st.error("يرجى إدخال الاسم واسم المستخدم وكلمة المرور.")
+                else:
+                    try:
+                        users_wks = sh.worksheet("Users")
+                        df_users = get_managed_users_df()
+
+                        if not df_users.empty and "Username" in df_users.columns:
+                            username_exists = (df_users["Username"].astype(str).str.lower() == username.strip().lower()).any()
+                        else:
+                            username_exists = False
+
+                        if username_exists:
+                            st.error("اسم المستخدم موجود بالفعل. اختر اسم مستخدم آخر.")
+                        else:
+                            sheet_name = create_role_sheet_if_missing(role_choice, username.strip())
+                            users_wks.append_row([
+                                username.strip(),
+                                password.strip(),
+                                role_choice,
+                                full_name.strip(),
+                                phone.strip(),
+                                str(datetime.now()),
+                                sheet_name
+                            ])
+                            st.success(f"تم إنشاء حساب {role_choice} بنجاح وإنشاء الشيت: {sheet_name}")
+                    except Exception as e:
+                        st.error(f"خطأ في إنشاء الحساب: {str(e)}")
+
+    with tab3:
+        st.info("التقارير العامة (قيد التطوير)")
 
 def assistant_page():
     st.title("👩‍💻 لوحة تحكم المساعد (Assistant)")
@@ -117,7 +243,7 @@ def assistant_page():
 
 def teacher_page():
     st.title("👨‍🏫 لوحة تحكم المدرس")
-    teacher_name = st.session_state.get("username", "teacher")
+    teacher_name = st.session_state.get("display_name", st.session_state.get("username", "teacher"))
     render_add_student_form("add_student_teacher", default_teacher=teacher_name)
 
     try:
@@ -208,18 +334,29 @@ def main():
             elif user == "assistant" and pwd == "mca_asst": # بيانات المساعد
                 st.session_state.role = "Assistant"
                 st.session_state.username = user
+                st.session_state.display_name = user
                 st.session_state.authenticated = True
                 st.rerun()
             elif user == "teacher" and pwd == "mca_teacher": # بيانات المدرس
                 st.session_state.role = "Teacher"
                 st.session_state.username = user
+                st.session_state.display_name = user
                 st.session_state.authenticated = True
                 st.rerun()
             else:
+                staff_auth = authenticate_staff_user(user, pwd)
+                if staff_auth is not None:
+                    st.session_state.role = staff_auth["role"]
+                    st.session_state.username = user
+                    st.session_state.display_name = staff_auth["display_name"]
+                    st.session_state.authenticated = True
+                    st.rerun()
+
                 # محاولة دخول كولي أمر (الرقم هو اليوزر والباسورد)
-                if user == pwd and len(user) >= 10:
+                elif user == pwd and len(user) >= 10:
                     st.session_state.role = "Parent"
                     st.session_state.username = user
+                    st.session_state.display_name = user
                     st.session_state.user_phone = user
                     st.session_state.authenticated = True
                     st.rerun()
