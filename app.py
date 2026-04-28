@@ -87,6 +87,9 @@ def authenticate_staff_user(username, password):
         return None
 
     try:
+        username = username.strip().lower()
+        password = password.strip()
+
         df_users = get_managed_users_df()
         if df_users.empty:
             return None
@@ -95,8 +98,8 @@ def authenticate_staff_user(username, password):
             return None
 
         matched = df_users[
-            (df_users["Username"].astype(str) == username)
-            & (df_users["Password"].astype(str) == password)
+            (df_users["Username"].astype(str).str.strip().str.lower() == username)
+            & (df_users["Password"].astype(str).str.strip() == password)
         ]
         if matched.empty:
             return None
@@ -209,21 +212,24 @@ def admin_page():
                     st.error("يرجى إدخال الاسم واسم المستخدم وكلمة المرور.")
                 else:
                     try:
+                        username_clean = username.strip().lower()
+                        password_clean = password.strip()
+
                         users_wks = sh.worksheet("Users")
                         df_users = get_managed_users_df()
 
                         if not df_users.empty and "Username" in df_users.columns:
-                            username_exists = (df_users["Username"].astype(str).str.lower() == username.strip().lower()).any()
+                            username_exists = (df_users["Username"].astype(str).str.strip().str.lower() == username_clean).any()
                         else:
                             username_exists = False
 
                         if username_exists:
                             st.error("اسم المستخدم موجود بالفعل. اختر اسم مستخدم آخر.")
                         else:
-                            sheet_name = create_role_sheet_if_missing(role_choice, username.strip())
+                            sheet_name = create_role_sheet_if_missing(role_choice, username_clean)
                             users_wks.append_row([
-                                username.strip(),
-                                password.strip(),
+                                username_clean,
+                                password_clean,
                                 role_choice,
                                 full_name.strip(),
                                 phone.strip(),
@@ -326,6 +332,9 @@ def main():
         pwd = st.text_input("كلمة المرور", type="password")
         
         if st.button("دخول"):
+            user = user.strip()
+            pwd = pwd.strip()
+
             if user == "admin" and pwd == "mca2026": # بيانات الأدمن
                 st.session_state.role = "Admin"
                 st.session_state.username = user
