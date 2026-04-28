@@ -197,6 +197,18 @@ def send_wa(phone, msg):
     url = f"https://wa.me/{phone}?text={msg.replace(' ', '%20')}"
     return url
 
+
+def normalize_phone(phone):
+    """Normalize phone to digits-only local format for reliable matching."""
+    p = re.sub(r"\D", "", str(phone or "")).strip()
+    if p.startswith("00"):
+        p = p[2:]
+    if p.startswith("20"):
+        p = p[2:]
+    if p.startswith("0"):
+        p = p[1:]
+    return p
+
 # --- واجهات المستخدم ---
 
 def render_add_student_form(form_key, default_teacher=""):
@@ -359,11 +371,26 @@ def parent_student_page(user_phone):
         
         # البحث في شيت الطلاب برقم التليفون
         df_students = pd.DataFrame(sh.worksheet("Students").get_all_records())
+        if df_students.empty:
+            st.warning("لا توجد بيانات طلاب حالياً.")
+            return
+
+        if "Phone" not in df_students.columns or "Parent_Phone" not in df_students.columns:
+            st.error("شيت الطلاب لا يحتوي على أعمدة Phone و Parent_Phone بالشكل الصحيح.")
+            return
+
         # تحويل العمود لنصوص للبحث
         df_students['Phone'] = df_students['Phone'].astype(str)
         df_students['Parent_Phone'] = df_students['Parent_Phone'].astype(str)
-        
-        student_info = df_students[(df_students['Phone'] == user_phone) | (df_students['Parent_Phone'] == user_phone)]
+
+        input_phone = normalize_phone(user_phone)
+        df_students['Phone_norm'] = df_students['Phone'].apply(normalize_phone)
+        df_students['Parent_Phone_norm'] = df_students['Parent_Phone'].apply(normalize_phone)
+
+        student_info = df_students[
+            (df_students['Phone_norm'] == input_phone)
+            | (df_students['Parent_Phone_norm'] == input_phone)
+        ]
         
         if not student_info.empty:
             s_name = student_info.iloc[0]['Name']
