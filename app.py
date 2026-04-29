@@ -683,15 +683,68 @@ def assistant_page():
                 if df_att.empty:
                     st.info("لا يوجد سجل حضور حتى الآن.")
                 else:
-                    # Filter by student name
                     student_names_att = sorted(df_att["Student_Name"].astype(str).str.strip().unique().tolist()) if "Student_Name" in df_att.columns else []
                     filter_name = st.selectbox("تصفية بالطالب", ["الكل"] + student_names_att, key="asst_att_filter")
+                    df_att_view = df_att.copy()
                     if filter_name != "الكل":
-                        df_att = df_att[df_att["Student_Name"].astype(str).str.strip() == filter_name]
-                    st.dataframe(df_att, use_container_width=True)
+                        df_att_view = df_att_view[df_att_view["Student_Name"].astype(str).str.strip() == filter_name]
+                    df_att_view = df_att_view.reset_index(drop=True)
+                    df_att_view.index = df_att_view.index + 1
+                    df_att_view.index.name = "#"
+                    st.dataframe(df_att_view, use_container_width=True)
             except Exception as e:
                 st.error(f"خطأ في تحميل سجل الحضور: {str(e)}")
 
+    with tab5:
+        st.subheader("🗓️ تقويم الحصص")
+        if not db_connected or sh is None:
+            st.warning("قاعدة البيانات غير متصلة.")
+        else:
+            try:
+                month_names = ["","يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
+                cal_c1, cal_c2 = st.columns(2)
+                with cal_c1:
+                    sel_month = st.selectbox("الشهر", list(range(1, 13)), index=datetime.now().month - 1,
+                                             format_func=lambda m: month_names[m], key="asst_cal_month")
+                with cal_c2:
+                    sel_year = st.number_input("السنة", min_value=2020, max_value=2030,
+                                               value=datetime.now().year, key="asst_cal_year")
+                df_att_cal = pd.DataFrame(get_sheet_records("Attendance"))
+                df_stu_cal = get_students_df()
+                if not df_att_cal.empty and "Session_Date" in df_att_cal.columns:
+                    df_att_cal["Session_Date"] = pd.to_datetime(df_att_cal["Session_Date"], errors="coerce")
+                    df_month = df_att_cal[
+                        (df_att_cal["Session_Date"].dt.month == sel_month) &
+                        (df_att_cal["Session_Date"].dt.year == sel_year)
+                    ].copy()
+                    if df_month.empty:
+                        st.info("لا توجد حصص مسجلة في هذا الشهر.")
+                    else:
+                        df_month["التاريخ"] = df_month["Session_Date"].dt.strftime("%Y-%m-%d")
+                        df_month["اليوم"] = df_month["Session_Date"].dt.strftime("%A")
+                        show_cols = ["التاريخ", "اليوم"] + [c for c in ["Student_Name", "Status", "Exam_Grade", "Recorded_By"] if c in df_month.columns]
+                        st.dataframe(df_month[show_cols].sort_values("التاريخ").reset_index(drop=True), use_container_width=True)
+                        st.markdown("**ملخص الحضور يومياً:**")
+                        summary = df_month.groupby("التاريخ")["Student_Name"].count().reset_index()
+                        summary.columns = ["التاريخ", "عدد الحصص"]
+                        st.dataframe(summary, use_container_width=True)
+                else:
+                    st.info("لا يوجد سجل حضور حتى الآن.")
+                if not df_stu_cal.empty and "Start_date" in df_stu_cal.columns:
+                    st.markdown("---")
+                    st.markdown("**📌 طلاب بدأت حصصهم هذا الشهر:**")
+                    df_stu_cal["Start_date_dt"] = pd.to_datetime(df_stu_cal["Start_date"], errors="coerce")
+                    upcoming = df_stu_cal[
+                        (df_stu_cal["Start_date_dt"].dt.month == sel_month) &
+                        (df_stu_cal["Start_date_dt"].dt.year == sel_year)
+                    ]
+                    if not upcoming.empty:
+                        up_cols = [c for c in ["Name", "Teacher", "Round", "Start_date", "Remaining_Sessions"] if c in upcoming.columns]
+                        st.dataframe(upcoming[up_cols].reset_index(drop=True), use_container_width=True)
+                    else:
+                        st.info("لا يوجد طلاب بدأت حصصهم في هذا الشهر.")
+            except Exception as e:
+                st.error(f"خطأ في تحميل التقويم: {str(e)}")
 def teacher_page():
     st.title("👨‍🏫 لوحة تحكم المدرس")
     st.info("يمكنك متابعة وتقييم الطلاب المضافين لك فقط")
