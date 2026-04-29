@@ -17,6 +17,11 @@ ATTENDANCE_HEADERS = [
     "Exam_Grade", "Notes", "Recorded_By", "Recorded_Role"
 ]
 
+COURSES_HEADERS = [
+    "Course_ID", "Course_Name", "Description", "Image_URL",
+    "Teacher", "Schedule", "Price", "Status", "Created_At"
+]
+
 
 def is_quota_error(err):
     msg = str(err)
@@ -446,6 +451,19 @@ def ensure_sheets_initialized(sheet):
         # Create Attendance sheet if it doesn't exist
         ws = sheet.add_worksheet(title="Attendance", rows=1, cols=len(ATTENDANCE_HEADERS))
         ws.append_row(ATTENDANCE_HEADERS)
+
+    try:
+        ws = sheet.worksheet("Courses")
+        current_headers = [str(h).strip() for h in ws.row_values(1)]
+        headers_invalid = (
+            len(current_headers) < len(COURSES_HEADERS)
+            or any(h == "" for h in current_headers[:len(COURSES_HEADERS)])
+        )
+        if headers_invalid:
+            ws.update("A1:I1", [COURSES_HEADERS])
+    except:
+        ws = sheet.add_worksheet(title="Courses", rows=200, cols=len(COURSES_HEADERS))
+        ws.append_row(COURSES_HEADERS)
 
     try:
         # Try to get Users sheet
@@ -889,12 +907,438 @@ def render_delete_student_section(section_key):
             except Exception as e:
                 st.error(f"خطأ أثناء حذف الطالب: {str(e)}")
 
+
+# ── Courses Management ────────────────────────────────────────────────────────
+
+def render_courses_card_grid(df_courses):
+    """Render course cards in AcademySystem-style grid for parent/student view."""
+    if df_courses.empty:
+        st.info("لا توجد كورسات متاحة حالياً.")
+        return
+
+    active = df_courses[df_courses.get("Status", pd.Series(["متاح"]*len(df_courses))).astype(str).str.strip() == "متاح"].copy()
+    if active.empty:
+        active = df_courses.copy()
+
+    rows = [active.iloc[i:i+3] for i in range(0, len(active), 3)]
+    for row_df in rows:
+        cols = st.columns(len(row_df))
+        for col, (_, course) in zip(cols, row_df.iterrows()):
+            name      = str(course.get("Course_Name", "")).strip() or "كورس"
+            desc      = str(course.get("Description", "")).strip()
+            img_url   = str(course.get("Image_URL", "")).strip()
+            teacher   = str(course.get("Teacher", "")).strip()
+            schedule  = str(course.get("Schedule", "")).strip()
+            price     = str(course.get("Price", "")).strip()
+            wa_phone  = "201000000000"  # default WA for trial booking
+
+            img_html = (
+                '<img src="' + img_url + '" style="width:100%;height:160px;object-fit:cover;border-radius:6px 6px 0 0;" onerror="this.style.display=\'none\'">'
+                if img_url and img_url.startswith("http")
+                else '<div style="width:100%;height:160px;background:linear-gradient(135deg,#2C7BE5 0%,#1a68d1 100%);border-radius:6px 6px 0 0;display:flex;align-items:center;justify-content:center;font-size:2.5rem;">📚</div>'
+            )
+
+            details_html = ""
+            if teacher:
+                details_html += f'<div style="font-size:0.78rem;color:#95AAC9;margin-top:4px;">👨‍🏫 {teacher}</div>'
+            if schedule:
+                details_html += f'<div style="font-size:0.78rem;color:#95AAC9;margin-top:2px;">📅 {schedule}</div>'
+            if price:
+                details_html += f'<div style="font-size:0.82rem;font-weight:600;color:#2C7BE5;margin-top:6px;">{price}</div>'
+
+            trial_msg = f"أريد حجز تجربة مجانية لكورس: {name}"
+            wa_url = f"https://wa.me/{wa_phone}?text={quote(trial_msg, safe='')}"
+
+            card_html = f"""
+<div style="background:#fff;border:1px solid #E3EBF6;border-radius:8px;box-shadow:0 4px 16px rgba(18,38,63,0.07);overflow:hidden;margin-bottom:1rem;font-family:'Inter',sans-serif;">
+  {img_html}
+  <div style="padding:14px 16px 16px;">
+    <div style="font-size:1rem;font-weight:700;color:#12263F;">{name}</div>
+    {f'<div style="font-size:0.82rem;color:#627080;margin-top:5px;line-height:1.4;">{desc}</div>' if desc else ''}
+    {details_html}
+    <a href="{wa_url}" target="_blank"
+       style="display:inline-block;margin-top:12px;background:#12263F;color:#fff;
+              text-decoration:none;padding:8px 18px;border-radius:6px;font-size:0.82rem;
+              font-weight:600;letter-spacing:0.2px;transition:background 0.15s;">
+      📖 Book a Trial
+    </a>
+  </div>
+</div>"""
+            col.markdown(card_html, unsafe_allow_html=True)
+
+
+def render_courses_management(key_prefix):
+    """Admin/Assistant course management: add, edit, delete."""
+    st.markdown("### 📚 إدارة الكورسات")
+
+    if not db_connected or sh is None:
+        st.warning("قاعدة البيانات غير متصلة.")
+        return
+
+    try:
+        df_courses = pd.DataFrame(get_sheet_records("Courses"))
+    except Exception as e:
+        st.error(f"خطأ في تحميل الكورسات: {str(e)}")
+        df_courses = pd.DataFrame()
+
+    # ── Add new course ──────────────────────────────────────────────────────
+    with st.expander("➕ إضافة كورس جديد"):
+        with st.form(f"{key_prefix}_add_course"):
+            c1, c2 = st.columns(2)
+            with c1:
+                c_name     = st.text_input("اسم الكورس *")
+                c_teacher  = st.text_input("المدرس المسؤول")
+                c_price    = st.text_input("السعر (مثال: 1500 جنيه / شهر)")
+            with c2:
+                c_schedule = st.text_input("المواعيد (مثال: السبت والاثنين 5م)")
+                c_img      = st.text_input("رابط الصورة (URL)")
+                c_status   = st.selectbox("الحالة", ["متاح", "مغلق"])
+            c_desc = st.text_area("وصف الكورس")
+
+            if st.form_submit_button("حفظ الكورس"):
+                if not c_name.strip():
+                    st.error("اسم الكورس مطلوب.")
+                else:
+                    try:
+                        wks = sh.worksheet("Courses")
+                        # Generate simple ID
+                        existing = wks.get_all_values()
+                        new_id = len(existing)  # row count as simple ID
+                        wks.append_row([
+                            str(new_id),
+                            c_name.strip(),
+                            c_desc.strip(),
+                            c_img.strip(),
+                            c_teacher.strip(),
+                            c_schedule.strip(),
+                            c_price.strip(),
+                            c_status,
+                            str(datetime.now().date())
+                        ])
+                        st.cache_data.clear()
+                        st.success(f"تم إضافة الكورس: {c_name.strip()}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"خطأ في إضافة الكورس: {str(e)}")
+
+    # ── View + Edit existing courses ────────────────────────────────────────
+    if not df_courses.empty:
+        st.markdown("#### الكورسات الحالية")
+        for col in COURSES_HEADERS:
+            if col not in df_courses.columns:
+                df_courses[col] = ""
+
+        for idx, row in df_courses.iterrows():
+            course_name = str(row.get("Course_Name", f"كورس #{idx+1}")).strip()
+            with st.expander(f"✏️ {course_name}"):
+                with st.form(f"{key_prefix}_edit_course_{idx}"):
+                    ec1, ec2 = st.columns(2)
+                    with ec1:
+                        e_name     = st.text_input("اسم الكورس", value=str(row.get("Course_Name", "")), key=f"cn_{key_prefix}_{idx}")
+                        e_teacher  = st.text_input("المدرس", value=str(row.get("Teacher", "")), key=f"ct_{key_prefix}_{idx}")
+                        e_price    = st.text_input("السعر", value=str(row.get("Price", "")), key=f"cp_{key_prefix}_{idx}")
+                    with ec2:
+                        e_schedule = st.text_input("المواعيد", value=str(row.get("Schedule", "")), key=f"cs_{key_prefix}_{idx}")
+                        e_img      = st.text_input("رابط الصورة", value=str(row.get("Image_URL", "")), key=f"ci_{key_prefix}_{idx}")
+                        status_opts = ["متاح", "مغلق"]
+                        cur_status = str(row.get("Status", "متاح")).strip()
+                        e_status   = st.selectbox("الحالة", status_opts,
+                                                   index=status_opts.index(cur_status) if cur_status in status_opts else 0,
+                                                   key=f"cst_{key_prefix}_{idx}")
+                    e_desc = st.text_area("الوصف", value=str(row.get("Description", "")), key=f"cd_{key_prefix}_{idx}")
+
+                    save_col, del_col = st.columns([3, 1])
+                    save = save_col.form_submit_button("💾 حفظ التعديلات")
+                    delete = del_col.form_submit_button("🗑️ حذف", type="secondary")
+
+                    if save:
+                        try:
+                            wks = sh.worksheet("Courses")
+                            all_vals = wks.get_all_values()
+                            sheet_row = idx + 2  # +1 for header, +1 for 1-based
+                            wks.update(f"A{sheet_row}:I{sheet_row}", [[
+                                str(row.get("Course_ID", "")),
+                                e_name.strip(), e_desc.strip(), e_img.strip(),
+                                e_teacher.strip(), e_schedule.strip(), e_price.strip(),
+                                e_status, str(row.get("Created_At", ""))
+                            ]])
+                            st.cache_data.clear()
+                            st.success("تم حفظ التعديلات.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"خطأ: {str(e)}")
+
+                    if delete:
+                        try:
+                            wks = sh.worksheet("Courses")
+                            sheet_row = idx + 2
+                            wks.delete_rows(sheet_row)
+                            st.cache_data.clear()
+                            st.success(f"تم حذف الكورس: {course_name}")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"خطأ في الحذف: {str(e)}")
+
+        st.markdown("#### معاينة الكورسات")
+        render_courses_card_grid(df_courses)
+    else:
+        st.info("لا توجد كورسات مضافة بعد. أضف كورساً من الأعلى.")
+
+
+# ── Edit Student Data ─────────────────────────────────────────────────────────
+
+def render_edit_student_section(section_key):
+    """Edit existing student profile information."""
+    with st.expander("✏️ تعديل بيانات طالب مسجل"):
+        if not db_connected or sh is None:
+            st.error("قاعدة البيانات غير متصلة.")
+            return
+
+        df_students = get_students_df()
+        if df_students.empty:
+            st.info("لا توجد بيانات طلاب متاحة.")
+            return
+
+        student_names = get_student_name_options(df_students)
+        if not student_names:
+            st.info("لا توجد أسماء طلاب.")
+            return
+
+        sel_name = st.selectbox("اختر الطالب", student_names, key=f"{section_key}_edit_name")
+        row = df_students[df_students["Name"] == sel_name].iloc[0]
+
+        with st.form(f"{section_key}_edit_student_form"):
+            ec1, ec2 = st.columns(2)
+            with ec1:
+                new_name   = st.text_input("الاسم", value=str(row.get("Name", "")))
+                new_phone  = st.text_input("رقم الطالب", value=str(row.get("Phone", "")))
+                new_pphone = st.text_input("رقم ولي الأمر", value=str(row.get("Parent_Phone", "")))
+            with ec2:
+                rounds_list = list(ROUNDS_CONFIG.keys())
+                cur_round = str(row.get("Round", rounds_list[0])).strip()
+                new_round  = st.selectbox("الراوند", rounds_list,
+                                          index=rounds_list.index(cur_round) if cur_round in rounds_list else 0)
+                pay_opts = ["مدفوع", "غير مدفوع"]
+                cur_pay  = str(row.get("Payment_Status", "مدفوع")).strip()
+                new_pay  = st.selectbox("حالة الدفع", pay_opts,
+                                        index=pay_opts.index(cur_pay) if cur_pay in pay_opts else 0)
+
+                teacher_directory = get_teacher_directory()
+                if teacher_directory:
+                    teacher_labels   = [t["label"] for t in teacher_directory]
+                    cur_teacher      = str(row.get("Teacher", "")).strip().lower()
+                    default_teacher  = next((i for i, t in enumerate(teacher_directory)
+                                            if t["username"] == cur_teacher), 0)
+                    sel_teacher_lbl  = st.selectbox("المدرس", teacher_labels, index=default_teacher)
+                    sel_teacher      = next((t for t in teacher_directory
+                                            if t["label"] == sel_teacher_lbl), teacher_directory[0])
+                    new_teacher      = sel_teacher["username"]
+                else:
+                    new_teacher = str(row.get("Teacher", ""))
+                    st.text_input("المدرس (username)", value=new_teacher, disabled=True)
+
+            if st.form_submit_button("💾 حفظ التعديلات"):
+                if not new_name.strip():
+                    st.error("الاسم مطلوب.")
+                else:
+                    try:
+                        wks = sh.worksheet("Students")
+                        all_vals = wks.get_all_values()
+                        if not all_vals:
+                            st.error("شيت الطلاب فارغ.")
+                            return
+                        headers = [str(h).strip() for h in all_vals[0]]
+                        col_map = {h: i + 1 for i, h in enumerate(headers)}
+
+                        # Find row in sheet
+                        name_idx = col_map.get("Name", 1) - 1
+                        target_row = None
+                        for r_idx, r in enumerate(all_vals[1:], start=2):
+                            if name_idx < len(r) and r[name_idx].strip() == sel_name:
+                                target_row = r_idx
+                                break
+
+                        if target_row is None:
+                            st.error("لم يتم العثور على الطالب في الشيت.")
+                            return
+
+                        # Recalculate sessions
+                        from datetime import datetime as _dt
+                        start_val = str(row.get("Start_date", "")).strip()
+                        t, c, rem = calculate_sessions(new_round, start_val)
+
+                        updates = {
+                            "Name": new_name.strip(),
+                            "Phone": new_phone.strip(),
+                            "Parent_Phone": new_pphone.strip(),
+                            "Round": new_round,
+                            "Teacher": new_teacher,
+                            "Payment_Status": new_pay,
+                            "Total_Sessions": str(t),
+                            "Completed_Sessions": str(c),
+                            "Remaining_Sessions": str(rem),
+                        }
+                        for col_name, val in updates.items():
+                            col_idx = col_map.get(col_name)
+                            if col_idx:
+                                wks.update_cell(target_row, col_idx, val)
+
+                        st.cache_data.clear()
+                        st.success(f"تم تحديث بيانات {new_name.strip()} بنجاح.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"خطأ في التعديل: {str(e)}")
+
+
+# ── Edit Attendance ───────────────────────────────────────────────────────────
+
+def render_edit_attendance_section(section_key):
+    """Edit or delete existing attendance records."""
+    with st.expander("📋 تعديل سجل الحضور والغياب"):
+        if not db_connected or sh is None:
+            st.error("قاعدة البيانات غير متصلة.")
+            return
+
+        try:
+            df_att = pd.DataFrame(get_sheet_records("Attendance"))
+        except Exception as e:
+            st.error(f"خطأ في تحميل سجل الحضور: {str(e)}")
+            return
+
+        if df_att.empty:
+            st.info("لا يوجد سجل حضور حتى الآن.")
+            return
+
+        student_names_att = sorted(
+            df_att["Student_Name"].astype(str).str.strip().unique().tolist()
+        ) if "Student_Name" in df_att.columns else []
+
+        if not student_names_att:
+            st.info("لا توجد أسماء طلاب في سجل الحضور.")
+            return
+
+        sel = st.selectbox("اختر الطالب", student_names_att, key=f"{section_key}_att_sel")
+        student_att = df_att[df_att["Student_Name"].astype(str).str.strip() == sel].copy()
+
+        if "Session_Date" in student_att.columns:
+            student_att["Session_Date"] = pd.to_datetime(student_att["Session_Date"], errors="coerce")
+            student_att = student_att.sort_values("Session_Date", ascending=False)
+
+        student_att = student_att.reset_index()  # keep original index as 'index' column
+        student_att["_sheet_row"] = student_att["index"] + 2  # +1 header +1 1-based
+
+        # Show sessions to choose from
+        if "Session_Date" in student_att.columns:
+            date_labels = [
+                f"{str(r.get('Session_Date', ''))[:10]}  —  {r.get('Status', '')}"
+                for _, r in student_att.iterrows()
+            ]
+        else:
+            date_labels = [f"سجل #{i+1}" for i in range(len(student_att))]
+
+        if not date_labels:
+            st.info("لا توجد سجلات لهذا الطالب.")
+            return
+
+        sel_idx = st.selectbox("اختر السجل للتعديل", list(range(len(date_labels))),
+                               format_func=lambda i: date_labels[i],
+                               key=f"{section_key}_att_row")
+
+        sel_row = student_att.iloc[sel_idx]
+        sheet_row_num = int(sel_row["_sheet_row"])
+
+        with st.form(f"{section_key}_edit_att_form_{sel_idx}"):
+            a1, a2 = st.columns(2)
+            with a1:
+                status_opts = ["حاضر", "غائب"]
+                cur_status  = str(sel_row.get("Status", "حاضر")).strip()
+                new_status  = st.selectbox("الحالة", status_opts,
+                                           index=status_opts.index(cur_status) if cur_status in status_opts else 0)
+                hw_opts    = ["سلم", "لم يسلم"]
+                cur_hw     = str(sel_row.get("Homework_Status", "سلم")).strip()
+                new_hw_st  = st.selectbox("حالة الواجب", hw_opts,
+                                          index=hw_opts.index(cur_hw) if cur_hw in hw_opts else 0)
+            with a2:
+                cur_grade  = str(sel_row.get("Exam_Grade", "0"))
+                try:
+                    cur_grade_int = int(float(cur_grade))
+                except:
+                    cur_grade_int = 0
+                new_grade  = st.number_input("درجة الامتحان", min_value=0, max_value=100,
+                                             value=cur_grade_int)
+                new_hw     = st.text_input("الواجب", value=str(sel_row.get("Homework", "")))
+            new_notes  = st.text_area("ملاحظات", value=str(sel_row.get("Notes", "")))
+
+            save_col, del_col = st.columns([3, 1])
+            do_save   = save_col.form_submit_button("💾 حفظ التعديل")
+            do_delete = del_col.form_submit_button("🗑️ حذف السجل", type="secondary")
+
+            if do_save:
+                try:
+                    att_wks = sh.worksheet("Attendance")
+                    all_vals = att_wks.get_all_values()
+                    headers  = [str(h).strip() for h in all_vals[0]] if all_vals else []
+                    col_map  = {h: i + 1 for i, h in enumerate(headers)}
+
+                    updates = {
+                        "Status":           new_status,
+                        "Homework":         new_hw.strip(),
+                        "Homework_Status":  new_hw_st,
+                        "Exam_Grade":       str(new_grade),
+                        "Notes":            new_notes.strip(),
+                    }
+                    for col_name, val in updates.items():
+                        ci = col_map.get(col_name)
+                        if ci:
+                            att_wks.update_cell(sheet_row_num, ci, val)
+
+                    # Sync Last_Status in Students sheet
+                    try:
+                        stu_wks  = sh.worksheet("Students")
+                        stu_vals = stu_wks.get_all_values()
+                        if stu_vals:
+                            sh_headers = [str(h).strip() for h in stu_vals[0]]
+                            sh_map     = {h: i + 1 for i, h in enumerate(sh_headers)}
+                            ni         = sh_map.get("Name", 1) - 1
+                            for ri, rv in enumerate(stu_vals[1:], start=2):
+                                if ni < len(rv) and rv[ni].strip() == sel:
+                                    for col_name, val in [
+                                        ("Last_Status", new_status),
+                                        ("Last_Homework_Status", new_hw_st),
+                                        ("Last_Exam_Grade", str(new_grade)),
+                                    ]:
+                                        ci2 = sh_map.get(col_name)
+                                        if ci2:
+                                            stu_wks.update_cell(ri, ci2, val)
+                                    break
+                    except:
+                        pass
+
+                    st.cache_data.clear()
+                    st.success("تم تحديث السجل بنجاح.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"خطأ في التعديل: {str(e)}")
+
+            if do_delete:
+                try:
+                    att_wks = sh.worksheet("Attendance")
+                    att_wks.delete_rows(sheet_row_num)
+                    st.cache_data.clear()
+                    st.success("تم حذف السجل.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"خطأ في الحذف: {str(e)}")
+
+
 def admin_page():
     st.title("👨‍💼 لوحة تحكم الأدمن")
-    tab1, tab2, tab3 = st.tabs(["إدارة الطلاب", "إضافة مدرس/مساعد", "التقارير العامة"])
+    tab1, tab2, tab3, tab4 = st.tabs(["إدارة الطلاب", "إضافة مدرس/مساعد", "📚 الكورسات", "التقارير العامة"])
     with tab1:
-        st.info("الأدمن يمكنه إضافة وحذف الطلاب")
+        st.info("الأدمن يمكنه إضافة وحذف وتعديل الطلاب")
         render_add_student_form("add_student_admin")
+        render_edit_student_section("admin")
+        render_edit_attendance_section("admin")
         render_delete_student_section("delete_student_admin")
 
         if db_connected and sh is not None:
@@ -962,12 +1406,15 @@ def admin_page():
                         st.error(f"خطأ في إنشاء الحساب: {str(e)}")
 
     with tab3:
+        render_courses_management("admin_courses")
+
+    with tab4:
         st.info("التقارير العامة (قيد التطوير)")
 
 def assistant_page():
     st.title("👩‍💻 لوحة تحكم المساعد (Assistant)")
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📋 قائمة الطلاب", "➕ إدارة الطلاب", "📅 متابعة السيشن", "📊 سجل الحضور", "🗓️ التقويم"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📋 قائمة الطلاب", "➕ إدارة الطلاب", "📝 تعديل البيانات", "📅 متابعة السيشن", "📊 سجل الحضور", "🗓️ التقويم"])
 
     with tab1:
         st.subheader("قائمة جميع الطلاب")
@@ -1004,6 +1451,10 @@ def assistant_page():
         render_delete_student_section("delete_student_assistant")
 
     with tab3:
+        render_edit_student_section("assistant")
+        render_edit_attendance_section("assistant")
+
+    with tab4:
         df_students = get_students_df()
         if df_students.empty:
             st.info("لا توجد بيانات طلاب حالياً للمتابعة.")
@@ -1032,7 +1483,7 @@ def assistant_page():
             except Exception as e:
                 st.error(f"خطأ في تحميل سجل الحضور: {str(e)}")
 
-    with tab5:
+    with tab6:
         st.subheader("🗓️ تقويم الحصص")
         if not db_connected or sh is None:
             st.warning("قاعدة البيانات غير متصلة.")
@@ -1167,7 +1618,16 @@ def parent_student_page(user_phone):
             st.markdown(f"## \U0001f393 {s_name}")
             st.divider()
 
-            # ── 1. CALENDAR (shown first) ────────────────────────────────
+            # ── 0. COURSES (shown first) ─────────────────────────────────
+            st.markdown("### 📚 الكورسات المتاحة")
+            try:
+                df_courses_parent = pd.DataFrame(get_sheet_records("Courses"))
+            except:
+                df_courses_parent = pd.DataFrame()
+            render_courses_card_grid(df_courses_parent)
+            st.divider()
+
+            # ── 1. CALENDAR ──────────────────────────────────────────────
             st.markdown("### \U0001f5d3\ufe0f \u0627\u0644\u062a\u0642\u0648\u064a\u0645 \u0627\u0644\u0634\u0647\u0631\u064a")
             month_names_list = ["","\u064a\u0646\u0627\u064a\u0631","\u0641\u0628\u0631\u0627\u064a\u0631","\u0645\u0627\u0631\u0633","\u0623\u0628\u0631\u064a\u0644","\u0645\u0627\u064a\u0648","\u064a\u0648\u0646\u064a\u0648","\u064a\u0648\u0644\u064a\u0648","\u0623\u063a\u0633\u0637\u0633","\u0633\u0628\u062a\u0645\u0628\u0631","\u0623\u0643\u062a\u0648\u0628\u0631","\u0646\u0648\u0641\u0645\u0628\u0631","\u062f\u064a\u0633\u0645\u0628\u0631"]
             cc1, cc2 = st.columns([2, 1])
