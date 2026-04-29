@@ -629,15 +629,59 @@ def admin_page():
 
 def assistant_page():
     st.title("👩‍💻 لوحة تحكم المساعد (Assistant)")
-    st.info("المساعد يمكنه إضافة وحذف الطلاب")
-    render_add_student_form("add_student_assistant")
-    render_delete_student_section("delete_student_assistant")
 
-    df_students = get_students_df()
-    if df_students.empty:
-        st.info("لا توجد بيانات طلاب حالياً للمتابعة.")
-        return
-    render_session_tracking(df_students, "assistant_session", "Assistant")
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 قائمة الطلاب", "➕ إدارة الطلاب", "📅 متابعة السيشن", "📊 سجل الحضور"])
+
+    with tab1:
+        st.subheader("قائمة جميع الطلاب")
+        if not db_connected or sh is None:
+            st.warning("قاعدة البيانات غير متصلة.")
+        else:
+            df_all = get_students_df()
+            if df_all.empty:
+                st.info("لا يوجد طلاب مسجلون حالياً.")
+            else:
+                # Summary metrics
+                col1, col2, col3 = st.columns(3)
+                col1.metric("إجمالي الطلاب", len(df_all))
+                paid_count = len(df_all[df_all.get("Payment_Status", pd.Series(dtype=str)).astype(str).str.strip() == "مدفوع"]) if "Payment_Status" in df_all.columns else "-"
+                col2.metric("طلاب مدفوعون", paid_count)
+                unpaid_count = len(df_all[df_all.get("Payment_Status", pd.Series(dtype=str)).astype(str).str.strip() == "غير مدفوع"]) if "Payment_Status" in df_all.columns else "-"
+                col3.metric("طلاب غير مدفوعين", unpaid_count)
+
+                display_cols = [c for c in ["Name", "Teacher", "Round", "Total_Sessions", "Completed_Sessions", "Remaining_Sessions", "Payment_Status", "Last_Session_Date"] if c in df_all.columns]
+                st.dataframe(df_all[display_cols], use_container_width=True)
+
+    with tab2:
+        st.info("المساعد يمكنه إضافة وحذف الطلاب")
+        render_add_student_form("add_student_assistant")
+        render_delete_student_section("delete_student_assistant")
+
+    with tab3:
+        df_students = get_students_df()
+        if df_students.empty:
+            st.info("لا توجد بيانات طلاب حالياً للمتابعة.")
+        else:
+            render_session_tracking(df_students, "assistant_session", "Assistant")
+
+    with tab4:
+        st.subheader("سجل الحضور والغياب")
+        if not db_connected or sh is None:
+            st.warning("قاعدة البيانات غير متصلة.")
+        else:
+            try:
+                df_att = pd.DataFrame(get_sheet_records("Attendance"))
+                if df_att.empty:
+                    st.info("لا يوجد سجل حضور حتى الآن.")
+                else:
+                    # Filter by student name
+                    student_names_att = sorted(df_att["Student_Name"].astype(str).str.strip().unique().tolist()) if "Student_Name" in df_att.columns else []
+                    filter_name = st.selectbox("تصفية بالطالب", ["الكل"] + student_names_att, key="asst_att_filter")
+                    if filter_name != "الكل":
+                        df_att = df_att[df_att["Student_Name"].astype(str).str.strip() == filter_name]
+                    st.dataframe(df_att, use_container_width=True)
+            except Exception as e:
+                st.error(f"خطأ في تحميل سجل الحضور: {str(e)}")
 
 def teacher_page():
     st.title("👨‍🏫 لوحة تحكم المدرس")
