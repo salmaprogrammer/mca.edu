@@ -644,13 +644,22 @@ def assistant_page():
                 # Summary metrics
                 col1, col2, col3 = st.columns(3)
                 col1.metric("إجمالي الطلاب", len(df_all))
-                paid_count = len(df_all[df_all.get("Payment_Status", pd.Series(dtype=str)).astype(str).str.strip() == "مدفوع"]) if "Payment_Status" in df_all.columns else "-"
+                if "Payment_Status" in df_all.columns:
+                    pay_col = df_all["Payment_Status"].astype(str).str.strip()
+                    paid_count = int((pay_col == "مدفوع").sum())
+                    unpaid_count = int((pay_col == "غير مدفوع").sum())
+                else:
+                    paid_count = "-"
+                    unpaid_count = "-"
                 col2.metric("طلاب مدفوعون", paid_count)
-                unpaid_count = len(df_all[df_all.get("Payment_Status", pd.Series(dtype=str)).astype(str).str.strip() == "غير مدفوع"]) if "Payment_Status" in df_all.columns else "-"
                 col3.metric("طلاب غير مدفوعين", unpaid_count)
 
-                display_cols = [c for c in ["Name", "Teacher", "Round", "Total_Sessions", "Completed_Sessions", "Remaining_Sessions", "Payment_Status", "Last_Session_Date"] if c in df_all.columns]
-                st.dataframe(df_all[display_cols], use_container_width=True)
+                ordered_cols = ["Name", "Phone", "Teacher", "Round", "Total_Sessions", "Completed_Sessions", "Remaining_Sessions", "Payment_Status", "Last_Session_Date"]
+                display_cols = [c for c in ordered_cols if c in df_all.columns]
+                df_display = df_all[display_cols].reset_index(drop=True)
+                df_display.index = df_display.index + 1
+                df_display.index.name = "#"
+                st.dataframe(df_display, use_container_width=True)
 
     with tab2:
         st.info("المساعد يمكنه إضافة وحذف الطلاب")
