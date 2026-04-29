@@ -60,6 +60,343 @@ def calculate_sessions(round_choice, start_date_value):
 # --- إعدادات الصفحة ---
 st.set_page_config(page_title="MCA Academy System", layout="wide", initial_sidebar_state="expanded")
 
+# ── Global Design Theme (AcademySystem-inspired) ──────────────────────────────
+st.markdown("""
+<style>
+/* ── Google Font: Inter ── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* ── Root tokens ── */
+:root {
+  --primary:      #2C7BE5;
+  --primary-dark: #1a68d1;
+  --bg:           #F5F6FA;
+  --card-bg:      #FFFFFF;
+  --sidebar-bg:   #FFFFFF;
+  --text:         #12263F;
+  --text-muted:   #95AAC9;
+  --border:       #E3EBF6;
+  --shadow:       0 4px 16px rgba(18,38,63,0.07);
+  --radius:       8px;
+}
+
+/* ── Base ── */
+html, body, [data-testid="stAppViewContainer"], .main {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+  background-color: var(--bg) !important;
+  color: var(--text) !important;
+}
+
+/* ── Sidebar ── */
+[data-testid="stSidebar"] {
+  background: var(--sidebar-bg) !important;
+  border-right: 1px solid var(--border) !important;
+  box-shadow: 2px 0 8px rgba(18,38,63,0.05) !important;
+}
+[data-testid="stSidebar"] * {
+  font-family: 'Inter', sans-serif !important;
+  color: var(--text) !important;
+}
+[data-testid="stSidebar"] .stSuccess p {
+  color: #00b050 !important;
+}
+
+/* ── Main header bar ── */
+[data-testid="stHeader"] {
+  background: var(--card-bg) !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+
+/* ── Page titles ── */
+h1 {
+  font-size: 1.75rem !important;
+  font-weight: 700 !important;
+  color: var(--text) !important;
+  margin-bottom: 0.25rem !important;
+  letter-spacing: -0.3px !important;
+}
+h2 {
+  font-size: 1.35rem !important;
+  font-weight: 600 !important;
+  color: var(--text) !important;
+}
+h3 {
+  font-size: 1.1rem !important;
+  font-weight: 600 !important;
+  color: var(--text) !important;
+}
+
+/* ── Metric cards ── */
+[data-testid="stMetric"] {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+  padding: 1rem 1.25rem !important;
+  box-shadow: var(--shadow) !important;
+}
+[data-testid="stMetricLabel"] p {
+  font-size: 0.78rem !important;
+  font-weight: 500 !important;
+  color: var(--text-muted) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+}
+[data-testid="stMetricValue"] {
+  font-size: 1.6rem !important;
+  font-weight: 700 !important;
+  color: var(--text) !important;
+}
+
+/* ── Buttons ── */
+.stButton > button {
+  background: var(--primary) !important;
+  color: #fff !important;
+  border: none !important;
+  border-radius: 6px !important;
+  font-weight: 500 !important;
+  font-size: 0.875rem !important;
+  padding: 0.45rem 1.1rem !important;
+  letter-spacing: 0.2px !important;
+  transition: background 0.15s ease, box-shadow 0.15s ease !important;
+  box-shadow: 0 1px 4px rgba(44,123,229,0.3) !important;
+}
+.stButton > button:hover {
+  background: var(--primary-dark) !important;
+  box-shadow: 0 3px 10px rgba(44,123,229,0.4) !important;
+}
+.stButton > button:active {
+  background: #155ab8 !important;
+}
+
+/* ── Form submit buttons ── */
+[data-testid="stFormSubmitButton"] > button {
+  background: var(--primary) !important;
+  color: #fff !important;
+  border-radius: 6px !important;
+  border: none !important;
+  font-weight: 500 !important;
+}
+[data-testid="stFormSubmitButton"] > button:hover {
+  background: var(--primary-dark) !important;
+}
+
+/* ── Text inputs / textareas / selects ── */
+input[type="text"], input[type="password"], input[type="number"],
+textarea, [data-testid="stTextInput"] input,
+[data-testid="stTextArea"] textarea {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 6px !important;
+  color: var(--text) !important;
+  font-size: 0.875rem !important;
+  font-family: 'Inter', sans-serif !important;
+  transition: border-color 0.15s ease !important;
+}
+input[type="text"]:focus, input[type="password"]:focus,
+textarea:focus {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 3px rgba(44,123,229,0.12) !important;
+  outline: none !important;
+}
+
+/* ── Select boxes ── */
+[data-testid="stSelectbox"] > div > div {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 6px !important;
+  font-size: 0.875rem !important;
+}
+
+/* ── Tabs ── */
+[data-testid="stTabs"] [role="tablist"] {
+  border-bottom: 2px solid var(--border) !important;
+  gap: 0 !important;
+}
+[data-testid="stTabs"] button[role="tab"] {
+  font-size: 0.85rem !important;
+  font-weight: 500 !important;
+  color: var(--text-muted) !important;
+  padding: 0.6rem 1.2rem !important;
+  border: none !important;
+  background: transparent !important;
+  border-bottom: 2px solid transparent !important;
+  margin-bottom: -2px !important;
+  transition: color 0.15s ease, border-color 0.15s ease !important;
+}
+[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+  color: var(--primary) !important;
+  border-bottom: 2px solid var(--primary) !important;
+  font-weight: 600 !important;
+}
+[data-testid="stTabs"] button[role="tab"]:hover {
+  color: var(--text) !important;
+}
+
+/* ── Dataframes / tables ── */
+[data-testid="stDataFrame"] {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: var(--shadow) !important;
+  overflow: hidden !important;
+}
+[data-testid="stDataFrame"] th {
+  background: #F8FAFD !important;
+  color: var(--text-muted) !important;
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  border-bottom: 2px solid var(--border) !important;
+  padding: 10px 12px !important;
+}
+[data-testid="stDataFrame"] td {
+  font-size: 0.875rem !important;
+  color: var(--text) !important;
+  padding: 9px 12px !important;
+  border-bottom: 1px solid #F0F4F8 !important;
+}
+
+/* ── Expander ── */
+[data-testid="stExpander"] {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: var(--shadow) !important;
+  margin-bottom: 0.75rem !important;
+}
+[data-testid="stExpander"] summary {
+  font-weight: 500 !important;
+  font-size: 0.9rem !important;
+  color: var(--text) !important;
+  padding: 0.75rem 1rem !important;
+}
+
+/* ── Alert boxes ── */
+[data-testid="stAlert"] {
+  border-radius: var(--radius) !important;
+  border: none !important;
+  font-size: 0.875rem !important;
+}
+.stInfo [data-testid="stAlert"] {
+  background: #EBF5FB !important;
+  border-left: 4px solid var(--primary) !important;
+}
+.stSuccess [data-testid="stAlert"] {
+  background: #EAFAF1 !important;
+  border-left: 4px solid #27AE60 !important;
+}
+.stWarning [data-testid="stAlert"] {
+  background: #FEF9E7 !important;
+  border-left: 4px solid #F39C12 !important;
+}
+.stError [data-testid="stAlert"] {
+  background: #FDEDEC !important;
+  border-left: 4px solid #E74C3C !important;
+}
+
+/* ── Info / Success / Warning shorthand ── */
+div[data-testid="stAlert"] > div {
+  font-family: 'Inter', sans-serif !important;
+}
+
+/* ── Divider ── */
+hr {
+  border: none !important;
+  border-top: 1px solid var(--border) !important;
+  margin: 1.25rem 0 !important;
+}
+
+/* ── Spinner / loading ── */
+[data-testid="stSpinner"] {
+  color: var(--primary) !important;
+}
+
+/* ── Radio buttons ── */
+[data-testid="stRadio"] label {
+  font-size: 0.875rem !important;
+  color: var(--text) !important;
+}
+
+/* ── Checkbox ── */
+[data-testid="stCheckbox"] label {
+  font-size: 0.875rem !important;
+  color: var(--text) !important;
+}
+
+/* ── Number input ── */
+[data-testid="stNumberInput"] input {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 6px !important;
+}
+
+/* ── Date input ── */
+[data-testid="stDateInput"] input {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 6px !important;
+}
+
+/* ── Forms ── */
+[data-testid="stForm"] {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+  padding: 1.25rem !important;
+  box-shadow: var(--shadow) !important;
+}
+
+/* ── Main content padding ── */
+.block-container {
+  padding-top: 2rem !important;
+  padding-bottom: 2rem !important;
+  max-width: 1200px !important;
+}
+
+/* ── Sidebar logout button ── */
+[data-testid="stSidebar"] .stButton > button {
+  background: transparent !important;
+  color: #E74C3C !important;
+  border: 1px solid #E74C3C !important;
+  box-shadow: none !important;
+  font-size: 0.82rem !important;
+}
+[data-testid="stSidebar"] .stButton > button:hover {
+  background: #FDEDEC !important;
+  box-shadow: none !important;
+}
+
+/* ── mca-cal calendar (parent page) ── */
+.mca-cal {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: 'Inter', sans-serif;
+  direction: rtl;
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.mca-cal th {
+  background: var(--primary) !important;
+  color: #fff !important;
+  font-size: 0.78rem !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.4px !important;
+  padding: 10px 6px !important;
+  border: 1px solid var(--primary-dark) !important;
+}
+.mca-cal td {
+  border: 1px solid #E3EBF6 !important;
+  min-width: 44px !important;
+  height: 58px !important;
+  vertical-align: top !important;
+  padding: 7px 6px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # --- الاتصال بـ Google Sheets عبر Secrets ---
 @st.cache_resource
 def init_connection():
@@ -997,11 +1334,52 @@ def main():
         st.session_state.authenticated = False
 
     if not st.session_state.authenticated:
-        st.title("🚪 تسجيل الدخول - MCA Academy")
-        user = st.text_input("اسم المستخدم / رقم التليفون")
-        pwd = st.text_input("كلمة المرور", type="password")
-        
-        if st.button("دخول"):
+        # ── Login page ─────────────────────────────────────────────────────
+        st.markdown("""
+<style>
+/* Center the login card */
+.login-wrap {
+  display: flex; justify-content: center; align-items: flex-start;
+  padding-top: 3rem;
+}
+.login-card {
+  background: #fff;
+  border: 1px solid #E3EBF6;
+  border-radius: 10px;
+  box-shadow: 0 4px 24px rgba(18,38,63,0.09);
+  padding: 2.5rem 2.25rem;
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
+}
+.login-logo {
+  font-size: 2rem;
+  font-weight: 800;
+  color: #2C7BE5;
+  text-align: center;
+  margin-bottom: 0.25rem;
+  letter-spacing: -1px;
+}
+.login-subtitle {
+  text-align: center;
+  color: #95AAC9;
+  font-size: 0.875rem;
+  margin-bottom: 1.75rem;
+}
+</style>
+<div class="login-card">
+  <div class="login-logo">🎓 MCA Academy</div>
+  <div class="login-subtitle">مرحباً بك — سجّل دخولك للمتابعة</div>
+</div>
+""", unsafe_allow_html=True)
+
+        col_left, col_center, col_right = st.columns([1, 2, 1])
+        with col_center:
+            user = st.text_input("اسم المستخدم / رقم التليفون", placeholder="أدخل اسم المستخدم...")
+            pwd = st.text_input("كلمة المرور", type="password", placeholder="أدخل كلمة المرور...")
+            st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+
+        if st.columns([1, 2, 1])[1].button("تسجيل الدخول", use_container_width=True):
             user = user.strip()
             pwd = pwd.strip()
 
@@ -1043,6 +1421,17 @@ def main():
                     st.error("خطأ في البيانات")
     else:
         role = st.session_state.role
+        display_name = st.session_state.get("display_name", st.session_state.get("username", ""))
+        role_icons = {"Admin": "👨‍💼", "Assistant": "👩‍💻", "Teacher": "👨‍🏫", "Parent": "👨‍👧"}
+        role_labels = {"Admin": "مدير النظام", "Assistant": "مساعد", "Teacher": "مدرس", "Parent": "ولي أمر"}
+
+        st.sidebar.markdown(f"""
+<div style="background:#F5F6FA;border-radius:8px;padding:14px 16px;margin-bottom:12px;border:1px solid #E3EBF6;">
+  <div style="font-size:1.35rem;font-weight:700;color:#12263F;">{role_icons.get(role,'🎓')} MCA Academy</div>
+  <div style="font-size:0.8rem;color:#95AAC9;margin-top:4px;">{display_name} · {role_labels.get(role, role)}</div>
+</div>
+""", unsafe_allow_html=True)
+
         if st.sidebar.button("تسجيل الخروج"):
             st.session_state.authenticated = False
             st.rerun()
