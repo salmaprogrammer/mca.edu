@@ -782,213 +782,216 @@ def teacher_page():
         st.error(f"خطأ في تحميل بيانات الطلاب: {str(e)}")
 
 def parent_student_page(user_phone):
-    st.title("📝 متابعة المستوى")
+    st.title("\U0001f4dd \u0645\u062a\u0627\u0628\u0639\u0629 \u0627\u0644\u0645\u0633\u062a\u0648\u0649")
     try:
         if not db_connected or sh is None:
-            st.warning("قاعدة البيانات غير متصلة. لا يمكن عرض البيانات.")
+            st.warning("\u0642\u0627\u0639\u062f\u0629 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u063a\u064a\u0631 \u0645\u062a\u0635\u0644\u0629. \u0644\u0627 \u064a\u0645\u0643\u0646 \u0639\u0631\u0636 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a.")
             return
-        
-        # البحث في شيت الطلاب برقم التليفون
+
         df_students = pd.DataFrame(get_sheet_records("Students"))
         if df_students.empty:
-            st.warning("لا توجد بيانات طلاب حالياً.")
+            st.warning("\u0644\u0627 \u062a\u0648\u062c\u062f \u0628\u064a\u0627\u0646\u0627\u062a \u0637\u0644\u0627\u0628 \u062d\u0627\u0644\u064a\u0627\u064b.")
             return
 
         if "Phone" not in df_students.columns or "Parent_Phone" not in df_students.columns:
-            st.error("شيت الطلاب لا يحتوي على أعمدة Phone و Parent_Phone بالشكل الصحيح.")
+            st.error("\u0634\u064a\u062a \u0627\u0644\u0637\u0644\u0627\u0628 \u0644\u0627 \u064a\u062d\u062a\u0648\u064a \u0639\u0644\u0649 \u0623\u0639\u0645\u062f\u0629 Phone \u0648 Parent_Phone \u0628\u0627\u0644\u0634\u0643\u0644 \u0627\u0644\u0635\u062d\u064a\u062d.")
             return
 
-        # تحويل العمود لنصوص للبحث
-        df_students['Phone'] = df_students['Phone'].astype(str)
-        df_students['Parent_Phone'] = df_students['Parent_Phone'].astype(str)
+        df_students["Phone"] = df_students["Phone"].astype(str)
+        df_students["Parent_Phone"] = df_students["Parent_Phone"].astype(str)
 
         input_phone = normalize_phone(user_phone)
-        df_students['Phone_norm'] = df_students['Phone'].apply(normalize_phone)
-        df_students['Parent_Phone_norm'] = df_students['Parent_Phone'].apply(normalize_phone)
+        df_students["Phone_norm"] = df_students["Phone"].apply(normalize_phone)
+        df_students["Parent_Phone_norm"] = df_students["Parent_Phone"].apply(normalize_phone)
 
         student_info = df_students[
-            (df_students['Phone_norm'] == input_phone)
-            | (df_students['Parent_Phone_norm'] == input_phone)
+            (df_students["Phone_norm"] == input_phone)
+            | (df_students["Parent_Phone_norm"] == input_phone)
         ]
-        
+
         if not student_info.empty:
-            import calendar
+            import calendar as _cal
 
             student_row = student_info.iloc[0]
-            s_name = str(student_row.get('Name', '')).strip()
+            s_name = str(student_row.get("Name", "")).strip()
 
-            st.subheader(f"الطالب: {s_name}")
-
-            # Load attendance data for this student only.
             df_att = pd.DataFrame(get_sheet_records("Attendance"))
             if not df_att.empty and "Student_Name" in df_att.columns:
                 personal_att = df_att[
-                    df_att['Student_Name'].astype(str).str.strip().str.lower() == s_name.lower()
+                    df_att["Student_Name"].astype(str).str.strip().str.lower() == s_name.lower()
                 ].copy()
             else:
                 personal_att = pd.DataFrame()
 
-            # KPI cards
-            total_sessions = student_row.get("Total_Sessions", "-") if "Total_Sessions" in student_row else "-"
+            if not personal_att.empty and "Session_Date" in personal_att.columns:
+                personal_att["Session_Date"] = pd.to_datetime(personal_att["Session_Date"], errors="coerce")
+                personal_att = personal_att.dropna(subset=["Session_Date"])
+
+            st.markdown(f"## \U0001f393 {s_name}")
+            st.divider()
+
+            # ── 1. CALENDAR (shown first) ────────────────────────────────
+            st.markdown("### \U0001f5d3\ufe0f \u0627\u0644\u062a\u0642\u0648\u064a\u0645 \u0627\u0644\u0634\u0647\u0631\u064a")
+            month_names_list = ["","\u064a\u0646\u0627\u064a\u0631","\u0641\u0628\u0631\u0627\u064a\u0631","\u0645\u0627\u0631\u0633","\u0623\u0628\u0631\u064a\u0644","\u0645\u0627\u064a\u0648","\u064a\u0648\u0646\u064a\u0648","\u064a\u0648\u0644\u064a\u0648","\u0623\u063a\u0633\u0637\u0633","\u0633\u0628\u062a\u0645\u0628\u0631","\u0623\u0643\u062a\u0648\u0628\u0631","\u0646\u0648\u0641\u0645\u0628\u0631","\u062f\u064a\u0633\u0645\u0628\u0631"]
+            cc1, cc2 = st.columns([2, 1])
+            with cc1:
+                sel_month = st.selectbox(
+                    "\u0627\u0644\u0634\u0647\u0631", list(range(1, 13)),
+                    index=datetime.now().month - 1,
+                    format_func=lambda m: month_names_list[m],
+                    key="parent_cal_month"
+                )
+            with cc2:
+                sel_year = st.number_input("\u0627\u0644\u0633\u0646\u0629", min_value=2020, max_value=2035,
+                                           value=datetime.now().year, key="parent_cal_year")
+
+            if not personal_att.empty:
+                month_df = personal_att[
+                    (personal_att["Session_Date"].dt.month == sel_month) &
+                    (personal_att["Session_Date"].dt.year == sel_year)
+                ].copy()
+                sessions_by_day = (month_df.groupby(month_df["Session_Date"].dt.day)["Session_Date"]
+                                   .count().to_dict() if not month_df.empty else {})
+                status_by_day = {}
+                if not month_df.empty and "Status" in month_df.columns:
+                    for d_num, grp in month_df.groupby(month_df["Session_Date"].dt.day):
+                        status_by_day[int(d_num)] = str(grp.sort_values("Session_Date").iloc[-1].get("Status", "")).strip()
+            else:
+                month_df = pd.DataFrame()
+                sessions_by_day = {}
+                status_by_day = {}
+
+            day_ar = ["\u0627\u0644\u0633\u0628\u062a","\u0627\u0644\u0623\u062d\u062f","\u0627\u0644\u0627\u062b\u0646\u064a\u0646","\u0627\u0644\u062b\u0644\u0627\u062b\u0627\u0621","\u0627\u0644\u0623\u0631\u0628\u0639\u0627\u0621","\u0627\u0644\u062e\u0645\u064a\u0633","\u0627\u0644\u062c\u0645\u0639\u0629"]
+            header_cells = "".join(
+                '<th style="background:#1e3a5f;color:#fff;text-align:center;padding:10px 4px;font-size:13px;border:2px solid #2c5282;">' + d + '</th>'
+                for d in day_ar
+            )
+            month_grid = _cal.Calendar(firstweekday=5).monthdayscalendar(int(sel_year), int(sel_month))
+            today = datetime.now().date()
+            rows_html = ""
+            for week in month_grid:
+                cells = ""
+                for day_num in week:
+                    if day_num == 0:
+                        cells += '<td style="background:#f0f0f0;border:1px solid #ccc;min-width:42px;height:60px;"></td>'
+                        continue
+                    day_status = status_by_day.get(day_num, "")
+                    day_count = int(sessions_by_day.get(day_num, 0))
+                    is_today = (day_num == today.day and sel_month == today.month and sel_year == today.year)
+                    if day_status == "\u062d\u0627\u0636\u0631":
+                        bg, fc, bdr = "#d4edda", "#155724", "2px solid #28a745"
+                        icon = "\u2705"
+                    elif day_status == "\u063a\u0627\u0626\u0628":
+                        bg, fc, bdr = "#f8d7da", "#721c24", "2px solid #dc3545"
+                        icon = "\u274c"
+                    elif is_today:
+                        bg, fc, bdr = "#cce5ff", "#004085", "3px solid #0056b3"
+                        icon = ""
+                    else:
+                        bg, fc, bdr = "#ffffff", "#333333", "1px solid #dee2e6"
+                        icon = ""
+                    session_line = (
+                        '<br><span style="font-size:11px;">' + icon + ' ' + str(day_count) + ' \u062d\u0635\u0629</span>'
+                        if day_count > 0
+                        else ('<br><span style="font-size:11px;">' + icon + '</span>' if icon else "")
+                    )
+                    cells += (
+                        '<td style="background:' + bg + ';border:' + bdr + ';text-align:center;'
+                        'padding:8px 4px;vertical-align:top;min-width:42px;height:60px;color:' + fc + ';">'
+                        '<strong style="font-size:15px;">' + str(day_num) + '</strong>' + session_line + '</td>'
+                    )
+                rows_html += "<tr>" + cells + "</tr>"
+
+            calendar_html = (
+                '<style>.mca-cal{border-collapse:collapse;width:100%;font-family:Arial,sans-serif;direction:rtl;}</style>'
+                '<table class="mca-cal"><thead><tr>' + header_cells + '</tr></thead>'
+                '<tbody>' + rows_html + '</tbody></table>'
+                '<p style="font-size:12px;margin-top:8px;color:#555;">'
+                '\u2705 \u062d\u0627\u0636\u0631 &nbsp; \u274c \u063a\u0627\u0626\u0628 &nbsp;'
+                '<span style="background:#cce5ff;padding:2px 6px;border-radius:3px;border:1px solid #004085;">\u0627\u0644\u064a\u0648\u0645</span></p>'
+            )
+            st.markdown(calendar_html, unsafe_allow_html=True)
+
+            if not month_df.empty:
+                with st.expander("\u062a\u0641\u0627\u0635\u064a\u0644 \u062d\u0635\u0635 \u0627\u0644\u0634\u0647\u0631"):
+                    det = month_df.copy()
+                    det["\u0627\u0644\u062a\u0627\u0631\u064a\u062e"] = det["Session_Date"].dt.strftime("%Y-%m-%d")
+                    det_cols = [c for c in ["\u0627\u0644\u062a\u0627\u0631\u064a\u062e","Status","Homework_Status","Exam_Grade"] if c in det.columns]
+                    det = det[det_cols].rename(columns={"Status":"\u0627\u0644\u062d\u0627\u0644\u0629","Homework_Status":"\u062d\u0627\u0644\u0629 \u0627\u0644\u0648\u0627\u062c\u0628","Exam_Grade":"\u062f\u0631\u062c\u0629 \u0627\u0644\u0627\u062e\u062a\u0628\u0627\u0631"})
+                    st.dataframe(det.sort_values("\u0627\u0644\u062a\u0627\u0631\u064a\u062e").reset_index(drop=True), use_container_width=True)
+            else:
+                st.info("\u0644\u0627 \u062a\u0648\u062c\u062f \u062d\u0635\u0635 \u0645\u0633\u062c\u0644\u0629 \u0641\u064a \u0647\u0630\u0627 \u0627\u0644\u0634\u0647\u0631.")
+
+            st.divider()
+
+            # ── 2. KPI Cards ─────────────────────────────────────────────
+            total_sessions     = student_row.get("Total_Sessions", "-")     if "Total_Sessions"     in student_row else "-"
             completed_sessions = student_row.get("Completed_Sessions", "-") if "Completed_Sessions" in student_row else "-"
             remaining_sessions = student_row.get("Remaining_Sessions", "-") if "Remaining_Sessions" in student_row else "-"
-            teacher_name = student_row.get("Teacher", "-") if "Teacher" in student_row else "-"
-            payment_status = student_row.get("Payment_Status", "-") if "Payment_Status" in student_row else "-"
-            round_name = student_row.get("Round", "-") if "Round" in student_row else "-"
+            teacher_name       = student_row.get("Teacher", "-")            if "Teacher"            in student_row else "-"
+            payment_status     = student_row.get("Payment_Status", "-")     if "Payment_Status"     in student_row else "-"
+            round_name         = student_row.get("Round", "-")              if "Round"              in student_row else "-"
 
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("إجمالي الحصص", total_sessions)
-            c2.metric("الحصص المنفذة", completed_sessions)
-            c3.metric("الحصص المتبقية", remaining_sessions)
-            c4.metric("حالة الدفع", payment_status)
-
+            c1.metric("\u0625\u062c\u0645\u0627\u0644\u064a \u0627\u0644\u062d\u0635\u0635", total_sessions)
+            c2.metric("\u0627\u0644\u062d\u0635\u0635 \u0627\u0644\u0645\u0646\u0641\u0630\u0629", completed_sessions)
+            c3.metric("\u0627\u0644\u062d\u0635\u0635 \u0627\u0644\u0645\u062a\u0628\u0642\u064a\u0629", remaining_sessions)
+            c4.metric("\u062d\u0627\u0644\u0629 \u0627\u0644\u062f\u0641\u0639", payment_status)
             c5, c6 = st.columns(2)
-            c5.info(f"👨‍🏫 المدرس: **{teacher_name}**")
-            c6.info(f"🎯 الراوند: **{round_name}**")
+            c5.info(f"\U0001f468\u200d\U0001f3eb \u0627\u0644\u0645\u062f\u0631\u0633: **{teacher_name}**")
+            c6.info(f"\U0001f3af \u0627\u0644\u0631\u0627\u0648\u0646\u062f: **{round_name}**")
 
-            tab1, tab2, tab3 = st.tabs(["📌 الملخص", "📚 سجل الحصص", "🗓️ التقويم الشهري"])
+            st.divider()
+
+            # ── 3. Summary + History Tabs ─────────────────────────────────
+            tab1, tab2 = st.tabs(["\U0001f4cc \u0627\u0644\u0645\u0644\u062e\u0635", "\U0001f4da \u0633\u062c\u0644 \u0627\u0644\u062d\u0635\u0635"])
 
             with tab1:
                 if personal_att.empty:
-                    st.info("لا توجد سجلات حضور لهذا الطالب حالياً.")
+                    st.info("\u0644\u0627 \u062a\u0648\u062c\u062f \u0633\u062c\u0644\u0627\u062a \u062d\u0636\u0648\u0631 \u0644\u0647\u0630\u0627 \u0627\u0644\u0637\u0627\u0644\u0628 \u062d\u0627\u0644\u064a\u0627\u064b.")
                 else:
-                    if "Session_Date" in personal_att.columns:
-                        personal_att["Session_Date"] = pd.to_datetime(personal_att["Session_Date"], errors="coerce")
                     if "Status" in personal_att.columns:
-                        present_count = int((personal_att["Status"].astype(str).str.strip() == "حاضر").sum())
-                        absent_count = int((personal_att["Status"].astype(str).str.strip() == "غائب").sum())
+                        present_count = int((personal_att["Status"].astype(str).str.strip() == "\u062d\u0627\u0636\u0631").sum())
+                        absent_count  = int((personal_att["Status"].astype(str).str.strip() == "\u063a\u0627\u0626\u0628").sum())
                     else:
-                        present_count = 0
-                        absent_count = 0
-
+                        present_count = absent_count = 0
                     m1, m2, m3 = st.columns(3)
-                    m1.metric("إجمالي الحصص المسجلة", len(personal_att))
-                    m2.metric("مرات الحضور", present_count)
-                    m3.metric("مرات الغياب", absent_count)
-
-                    latest = personal_att.sort_values("Session_Date", ascending=False).iloc[0] if "Session_Date" in personal_att.columns else personal_att.iloc[-1]
-                    st.markdown("**آخر متابعة:**")
-                    l1, l2, l3, l4 = st.columns(4)
-                    l1.write(f"التاريخ: {str(latest.get('Session_Date', '-'))[:10]}")
-                    l2.write(f"الحالة: {latest.get('Status', '-')}")
-                    l3.write(f"حالة الواجب: {latest.get('Homework_Status', '-')}")
-                    l4.write(f"درجة الاختبار: {latest.get('Exam_Grade', '-')}")
+                    m1.metric("\u0625\u062c\u0645\u0627\u0644\u064a \u0627\u0644\u062d\u0635\u0635 \u0627\u0644\u0645\u0633\u062c\u0644\u0629", len(personal_att))
+                    m2.metric("\u0645\u0631\u0627\u062a \u0627\u0644\u062d\u0636\u0648\u0631 \u2705", present_count)
+                    m3.metric("\u0645\u0631\u0627\u062a \u0627\u0644\u063a\u064a\u0627\u0628 \u274c", absent_count)
+                    if "Session_Date" in personal_att.columns:
+                        latest = personal_att.sort_values("Session_Date", ascending=False).iloc[0]
+                        st.markdown("**\u0622\u062e\u0631 \u0645\u062a\u0627\u0628\u0639\u0629:**")
+                        l1, l2, l3, l4 = st.columns(4)
+                        l1.write(f"\u0627\u0644\u062a\u0627\u0631\u064a\u062e: {str(latest.get('Session_Date', '-'))[:10]}")
+                        l2.write(f"\u0627\u0644\u062d\u0627\u0644\u0629: {latest.get('Status', '-')}")
+                        l3.write(f"\u062d\u0627\u0644\u0629 \u0627\u0644\u0648\u0627\u062c\u0628: {latest.get('Homework_Status', '-')}")
+                        l4.write(f"\u062f\u0631\u062c\u0629 \u0627\u0644\u0627\u062e\u062a\u0628\u0627\u0631: {latest.get('Exam_Grade', '-')}")
 
             with tab2:
                 if personal_att.empty:
-                    st.info("لا توجد حصص لعرضها.")
+                    st.info("\u0644\u0627 \u062a\u0648\u062c\u062f \u062d\u0635\u0635 \u0644\u0639\u0631\u0636\u0647\u0627.")
                 else:
-                    if "Session_Date" in personal_att.columns:
-                        personal_att["Session_Date"] = pd.to_datetime(personal_att["Session_Date"], errors="coerce")
-                        personal_att = personal_att.sort_values("Session_Date", ascending=False)
-
-                    table_cols = [c for c in ["Session_Date", "Status", "Homework", "Homework_Status", "Exam_Grade", "Notes", "Recorded_By"] if c in personal_att.columns]
-                    view_df = personal_att[table_cols].copy()
-                    rename_map = {
-                        "Session_Date": "التاريخ",
-                        "Status": "الحالة",
-                        "Homework": "الواجب",
-                        "Homework_Status": "حالة الواجب",
-                        "Exam_Grade": "درجة الاختبار",
-                        "Notes": "ملاحظات",
-                        "Recorded_By": "تم التسجيل بواسطة",
-                    }
-                    view_df.rename(columns=rename_map, inplace=True)
-                    if "التاريخ" in view_df.columns:
-                        view_df["التاريخ"] = pd.to_datetime(view_df["التاريخ"], errors="coerce").dt.strftime("%Y-%m-%d")
-
-                    view_df = view_df.reset_index(drop=True)
-                    view_df.index = view_df.index + 1
-                    view_df.index.name = "#"
-                    st.dataframe(view_df, use_container_width=True)
-
-            with tab3:
-                if personal_att.empty or "Session_Date" not in personal_att.columns:
-                    st.info("لا توجد بيانات كافية لعرض التقويم.")
-                else:
-                    personal_att["Session_Date"] = pd.to_datetime(personal_att["Session_Date"], errors="coerce")
-                    personal_att = personal_att.dropna(subset=["Session_Date"]).copy()
-
-                    if personal_att.empty:
-                        st.info("لا توجد بيانات كافية لعرض التقويم.")
-                    else:
-                        month_names = ["", "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
-                        cc1, cc2 = st.columns(2)
-                        with cc1:
-                            sel_month = st.selectbox(
-                                "الشهر",
-                                list(range(1, 13)),
-                                index=datetime.now().month - 1,
-                                format_func=lambda m: month_names[m],
-                                key="parent_cal_month"
-                            )
-                        with cc2:
-                            sel_year = st.number_input("السنة", min_value=2020, max_value=2035, value=datetime.now().year, key="parent_cal_year")
-
-                        month_df = personal_att[
-                            (personal_att["Session_Date"].dt.month == sel_month)
-                            & (personal_att["Session_Date"].dt.year == sel_year)
-                        ].copy()
-
-                        sessions_by_day = month_df.groupby(month_df["Session_Date"].dt.day)["Session_Date"].count().to_dict()
-                        status_by_day = {}
-                        if "Status" in month_df.columns:
-                            latest_per_day = month_df.sort_values("Session_Date").groupby(month_df["Session_Date"].dt.day).tail(1)
-                            status_by_day = {
-                                int(r["Session_Date"].day): str(r.get("Status", "")).strip()
-                                for _, r in latest_per_day.iterrows()
-                            }
-
-                        st.markdown(f"### {month_names[int(sel_month)]} {int(sel_year)}")
-                        day_headers = ["السبت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"]
-                        hcols = st.columns(7)
-                        for i, d in enumerate(day_headers):
-                            hcols[i].markdown(f"**{d}**")
-
-                        month_grid = calendar.Calendar(firstweekday=5).monthdayscalendar(int(sel_year), int(sel_month))
-                        for week in month_grid:
-                            wcols = st.columns(7)
-                            for i, day_num in enumerate(week):
-                                if day_num == 0:
-                                    wcols[i].markdown(" ")
-                                    continue
-
-                                day_count = int(sessions_by_day.get(day_num, 0))
-                                day_status = status_by_day.get(day_num, "")
-                                if day_status == "حاضر":
-                                    status_icon = "✅"
-                                elif day_status == "غائب":
-                                    status_icon = "❌"
-                                else:
-                                    status_icon = "•"
-
-                                if day_count > 0:
-                                    text = f"**{day_num}**\\n\\n{status_icon} {day_count} حصة"
-                                else:
-                                    text = f"**{day_num}**"
-
-                                wcols[i].markdown(text)
-
-                        if month_df.empty:
-                            st.info("لا توجد حصص في هذا الشهر.")
-                        else:
-                            st.markdown("**تفاصيل حصص الشهر:**")
-                            details = month_df.copy()
-                            details["التاريخ"] = details["Session_Date"].dt.strftime("%Y-%m-%d")
-                            show_cols = [c for c in ["التاريخ", "Status", "Homework_Status", "Exam_Grade"] if c in details.columns]
-                            details = details[show_cols].rename(columns={
-                                "Status": "الحالة",
-                                "Homework_Status": "حالة الواجب",
-                                "Exam_Grade": "درجة الاختبار",
-                            })
-                            details = details.sort_values("التاريخ").reset_index(drop=True)
-                            st.dataframe(details, use_container_width=True)
+                    pa = personal_att.sort_values("Session_Date", ascending=False).copy()
+                    tcols = [c for c in ["Session_Date","Status","Homework","Homework_Status","Exam_Grade","Notes","Recorded_By"] if c in pa.columns]
+                    vdf = pa[tcols].copy()
+                    vdf.rename(columns={
+                        "Session_Date":"\u0627\u0644\u062a\u0627\u0631\u064a\u062e","Status":"\u0627\u0644\u062d\u0627\u0644\u0629",
+                        "Homework":"\u0627\u0644\u0648\u0627\u062c\u0628","Homework_Status":"\u062d\u0627\u0644\u0629 \u0627\u0644\u0648\u0627\u062c\u0628",
+                        "Exam_Grade":"\u062f\u0631\u062c\u0629 \u0627\u0644\u0627\u062e\u062a\u0628\u0627\u0631","Notes":"\u0645\u0644\u0627\u062d\u0638\u0627\u062a",
+                        "Recorded_By":"\u062a\u0645 \u0627\u0644\u062a\u0633\u062c\u064a\u0644 \u0628\u0648\u0627\u0633\u0637\u0629"
+                    }, inplace=True)
+                    if "\u0627\u0644\u062a\u0627\u0631\u064a\u062e" in vdf.columns:
+                        vdf["\u0627\u0644\u062a\u0627\u0631\u064a\u062e"] = pd.to_datetime(vdf["\u0627\u0644\u062a\u0627\u0631\u064a\u062e"], errors="coerce").dt.strftime("%Y-%m-%d")
+                    vdf = vdf.reset_index(drop=True)
+                    vdf.index = vdf.index + 1
+                    vdf.index.name = "#"
+                    st.dataframe(vdf, use_container_width=True)
         else:
-            st.warning("عذراً، لم نجد بيانات مرتبطة بهذا الرقم.")
+            st.warning("\u0639\u0630\u0631\u0627\u064b\u060c \u0644\u0645 \u0646\u062c\u062f \u0628\u064a\u0627\u0646\u0627\u062a \u0645\u0631\u062a\u0628\u0637\u0629 \u0628\u0647\u0630\u0627 \u0627\u0644\u0631\u0642\u0645.")
     except Exception as e:
-        st.error(f"خطأ في تحميل البيانات: {str(e)}")
+        st.error(f"\u062e\u0637\u0623 \u0641\u064a \u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a: {str(e)}")
 
-# --- التحكم في الدخول (Login) ---
 def main():
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
