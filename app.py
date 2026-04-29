@@ -630,7 +630,7 @@ def admin_page():
 def assistant_page():
     st.title("👩‍💻 لوحة تحكم المساعد (Assistant)")
 
-    tab1, tab2, tab3, tab4 = st.tabs(["📋 قائمة الطلاب", "➕ إدارة الطلاب", "📅 متابعة السيشن", "📊 سجل الحضور"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📋 قائمة الطلاب", "➕ إدارة الطلاب", "📅 متابعة السيشن", "📊 سجل الحضور", "🗓️ التقويم"])
 
     with tab1:
         st.subheader("قائمة جميع الطلاب")
