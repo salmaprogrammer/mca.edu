@@ -754,6 +754,47 @@ def get_attendance_df():
     return df
 
 
+def get_teacher_filter_options():
+    """Return teacher usernames for filtering plus helper map."""
+    df_students = get_students_df()
+    if df_students.empty or "Teacher" not in df_students.columns:
+        return ["الكل"], {}
+
+    teachers = (
+        df_students["Teacher"]
+        .astype(str)
+        .str.strip()
+        .str.lower()
+    )
+    teachers = teachers[teachers != ""]
+    unique_teachers = sorted(teachers.unique().tolist())
+    options = ["الكل"] + unique_teachers
+    label_map = {"الكل": "الكل"}
+    for t in unique_teachers:
+        label_map[t] = t
+    return options, label_map
+
+
+def filter_attendance_by_teacher(df_att, teacher_username):
+    """Filter attendance rows to students assigned to a specific teacher."""
+    if df_att.empty or not teacher_username or teacher_username == "الكل":
+        return df_att
+
+    df_students = get_students_df()
+    if df_students.empty or "Name" not in df_students.columns or "Teacher" not in df_students.columns:
+        return pd.DataFrame(columns=df_att.columns)
+
+    teacher_students = df_students[
+        df_students["Teacher"].astype(str).str.strip().str.lower() == str(teacher_username).strip().lower()
+    ]["Name"].astype(str).str.strip().tolist()
+
+    if not teacher_students:
+        return pd.DataFrame(columns=df_att.columns)
+
+    allowed = set(teacher_students)
+    return df_att[df_att["Student_Name"].astype(str).str.strip().isin(allowed)].copy()
+
+
 def render_session_tracking(df_students, key_prefix, role_label):
     st.subheader("متابعة السيشن")
 
@@ -1719,6 +1760,21 @@ def assistant_page():
                 if df_att.empty:
                     st.info("لا يوجد سجل حضور حتى الآن.")
                 else:
+                    teacher_options, _ = get_teacher_filter_options()
+                    current_user = str(st.session_state.get("username", "")).strip().lower()
+                    default_teacher_idx = teacher_options.index(current_user) if current_user in teacher_options else 0
+                    selected_teacher = st.selectbox(
+                        "تصفية بالمدرس",
+                        teacher_options,
+                        index=default_teacher_idx,
+                        key="asst_teacher_filter",
+                    )
+                    df_att = filter_attendance_by_teacher(df_att, selected_teacher)
+
+                    if df_att.empty:
+                        st.info("لا توجد سجلات حضور للفلتر المختار.")
+                        return
+
                     student_names_att = sorted(df_att["Student_Name"].astype(str).str.strip().unique().tolist()) if "Student_Name" in df_att.columns else []
                     filter_name = st.selectbox("تصفية بالطالب", ["الكل"] + student_names_att, key="asst_att_filter")
                     df_att_view = df_att.copy()
@@ -1738,14 +1794,26 @@ def assistant_page():
         else:
             try:
                 month_names = ["","يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
-                cal_c1, cal_c2 = st.columns(2)
+                cal_c1, cal_c2, cal_c3 = st.columns(3)
                 with cal_c1:
                     sel_month = st.selectbox("الشهر", list(range(1, 13)), index=datetime.now().month - 1,
                                              format_func=lambda m: month_names[m], key="asst_cal_month")
                 with cal_c2:
                     sel_year = st.number_input("السنة", min_value=2020, max_value=2030,
                                                value=datetime.now().year, key="asst_cal_year")
+                with cal_c3:
+                    teacher_options, _ = get_teacher_filter_options()
+                    current_user = str(st.session_state.get("username", "")).strip().lower()
+                    default_teacher_idx = teacher_options.index(current_user) if current_user in teacher_options else 0
+                    selected_teacher_cal = st.selectbox(
+                        "المدرس",
+                        teacher_options,
+                        index=default_teacher_idx,
+                        key="asst_cal_teacher_filter",
+                    )
+
                 df_att_cal = get_attendance_df()
+                df_att_cal = filter_attendance_by_teacher(df_att_cal, selected_teacher_cal)
                 df_stu_cal = get_students_df()
                 if not df_att_cal.empty and "Session_Date" in df_att_cal.columns:
                     df_att_cal["Session_Date"] = pd.to_datetime(df_att_cal["Session_Date"], errors="coerce")
