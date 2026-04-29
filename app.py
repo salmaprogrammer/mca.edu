@@ -726,6 +726,34 @@ def get_students_df():
     return df
 
 
+def get_attendance_df():
+    """Load attendance with fallback parsing if headers are malformed."""
+    if not db_connected or sh is None:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(get_sheet_records("Attendance"))
+    if df.empty:
+        try:
+            wks = sh.worksheet("Attendance")
+            values = wks.get_all_values()
+            if values and len(values) > 1:
+                headers = [str(h).strip() for h in values[0]]
+                rows = values[1:]
+                df = pd.DataFrame(rows, columns=headers)
+        except:
+            df = pd.DataFrame()
+
+    if df.empty:
+        return df
+
+    for col in ATTENDANCE_HEADERS:
+        if col not in df.columns:
+            df[col] = ""
+
+    df["Student_Name"] = df["Student_Name"].astype(str).str.strip()
+    return df
+
+
 def render_session_tracking(df_students, key_prefix, role_label):
     st.subheader("متابعة السيشن")
 
@@ -1200,7 +1228,7 @@ def render_edit_attendance_section(section_key):
             return
 
         try:
-            df_att = pd.DataFrame(get_sheet_records("Attendance"))
+            df_att = get_attendance_df()
         except Exception as e:
             st.error(f"خطأ في تحميل سجل الحضور: {str(e)}")
             return
@@ -1331,9 +1359,226 @@ def render_edit_attendance_section(section_key):
                     st.error(f"خطأ في الحذف: {str(e)}")
 
 
+def render_teacher_management_section(section_key):
+    """Admin section to manage teachers, assign students, and manage course schedules."""
+    st.markdown("### 👨‍🏫 إدارة المدرسين")
+
+    if not db_connected or sh is None:
+        st.warning("قاعدة البيانات غير متصلة.")
+        return
+
+    df_users = get_managed_users_df()
+    teachers = df_users[df_users["Role"] == "teacher"].copy() if not df_users.empty else pd.DataFrame()
+
+    with st.expander("➕ إضافة مدرس جديد"):
+        with st.form(f"{section_key}_add_teacher"):
+            c1, c2 = st.columns(2)
+            with c1:
+                full_name = st.text_input("الاسم الكامل")
+                username = st.text_input("اسم المستخدم")
+            with c2:
+                password = st.text_input("كلمة المرور", type="password")
+                phone = st.text_input("رقم الهاتف")
+
+            if st.form_submit_button("إنشاء حساب مدرس"):
+                if not full_name.strip() or not username.strip() or not password.strip():
+                    st.error("يرجى إدخال الاسم واسم المستخدم وكلمة المرور.")
+                else:
+                    try:
+                        username_clean = username.strip().lower()
+                        users_wks = sh.worksheet("Users")
+                        username_exists = (not df_users.empty) and (df_users["Username"] == username_clean).any()
+                        if username_exists:
+                            st.error("اسم المستخدم موجود بالفعل.")
+                        else:
+                            sheet_name = create_role_sheet_if_missing("Teacher", username_clean)
+                            users_wks.append_row([
+                                username_clean,
+                                password.strip(),
+                                "Teacher",
+                                full_name.strip(),
+                                phone.strip(),
+                                str(datetime.now()),
+                                sheet_name,
+                            ])
+                            st.cache_data.clear()
+                            st.success("تم إنشاء حساب المدرس بنجاح.")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"خطأ في إنشاء حساب المدرس: {str(e)}")
+
+    if teachers.empty:
+        st.info("لا يوجد مدرسون حالياً.")
+        return
+
+    teachers = teachers.sort_values("Username").reset_index(drop=True)
+    teacher_labels = [
+        f"{str(r.get('Full_Name', '')).strip() or r['Username']} ({r['Username']})"
+        for _, r in teachers.iterrows()
+    ]
+    sel_teacher_idx = st.selectbox(
+        "اختر المدرس للإدارة",
+        list(range(len(teacher_labels))),
+        format_func=lambda i: teacher_labels[i],
+        key=f"{section_key}_teacher_select",
+    )
+    teacher_row = teachers.iloc[sel_teacher_idx]
+    teacher_username = str(teacher_row.get("Username", "")).strip().lower()
+
+    with st.expander("✏️ تعديل بيانات المدرس", expanded=True):
+        with st.form(f"{section_key}_edit_teacher"):
+            e1, e2 = st.columns(2)
+            with e1:
+                edit_name = st.text_input("الاسم الكامل", value=str(teacher_row.get("Full_Name", "")))
+                edit_phone = st.text_input("رقم الهاتف", value=str(teacher_row.get("Phone", "")))
+            with e2:
+                st.text_input("اسم المستخدم", value=teacher_username, disabled=True)
+                edit_password = st.text_input("كلمة مرور جديدة (اختياري)", type="password")
+
+            if st.form_submit_button("💾 حفظ تعديل المدرس"):
+                try:
+                    users_wks = sh.worksheet("Users")
+                    vals = users_wks.get_all_values()
+                    headers = [str(h).strip() for h in vals[0]] if vals else []
+                    col_map = {h: i + 1 for i, h in enumerate(headers)}
+                    user_idx = col_map.get("Username", 1) - 1
+                    target_row = None
+                    for r_idx, rv in enumerate(vals[1:], start=2):
+                        if user_idx < len(rv) and str(rv[user_idx]).strip().lower() == teacher_username:
+                            target_row = r_idx
+                            break
+
+                    if target_row is None:
+                        st.error("لم يتم العثور على المدرس.")
+                    else:
+                        updates = {
+                            "Full_Name": edit_name.strip(),
+                            "Phone": edit_phone.strip(),
+                        }
+                        if edit_password.strip():
+                            updates["Password"] = edit_password.strip()
+                        for col_name, val in updates.items():
+                            ci = col_map.get(col_name)
+                            if ci:
+                                users_wks.update_cell(target_row, ci, val)
+                        st.cache_data.clear()
+                        st.success("تم تحديث بيانات المدرس.")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"خطأ في تحديث بيانات المدرس: {str(e)}")
+
+    with st.expander("👥 تعيين الطلاب للمدرس"):
+        df_students = get_students_df()
+        if df_students.empty:
+            st.info("لا يوجد طلاب حالياً.")
+        else:
+            if "Teacher" not in df_students.columns:
+                df_students["Teacher"] = ""
+
+            all_students = sorted(df_students["Name"].astype(str).str.strip().tolist())
+            assigned_now = sorted(
+                df_students[df_students["Teacher"].astype(str).str.strip().str.lower() == teacher_username]["Name"]
+                .astype(str)
+                .str.strip()
+                .tolist()
+            )
+            selected_students = st.multiselect(
+                "اختر الطلاب المسندين لهذا المدرس",
+                options=all_students,
+                default=assigned_now,
+                key=f"{section_key}_assign_students",
+            )
+
+            if st.button("حفظ تعيين الطلاب", key=f"{section_key}_save_assign"):
+                try:
+                    wks = sh.worksheet("Students")
+                    vals = wks.get_all_values()
+                    headers = [str(h).strip() for h in vals[0]] if vals else []
+                    col_map = {h: i + 1 for i, h in enumerate(headers)}
+                    name_idx = col_map.get("Name", 1) - 1
+                    teacher_col = col_map.get("Teacher")
+
+                    if not teacher_col:
+                        st.error("عمود Teacher غير موجود في شيت الطلاب.")
+                    else:
+                        selected_set = {str(s).strip() for s in selected_students}
+                        for r_idx, row_vals in enumerate(vals[1:], start=2):
+                            student_name = row_vals[name_idx].strip() if name_idx < len(row_vals) else ""
+                            current_teacher = row_vals[teacher_col - 1].strip().lower() if (teacher_col - 1) < len(row_vals) else ""
+
+                            if student_name in selected_set:
+                                wks.update_cell(r_idx, teacher_col, teacher_username)
+                            elif current_teacher == teacher_username:
+                                wks.update_cell(r_idx, teacher_col, "")
+
+                        st.cache_data.clear()
+                        st.success("تم تحديث تعيين الطلاب للمدرس.")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"خطأ في تعيين الطلاب: {str(e)}")
+
+    with st.expander("📅 تعديل مواعيد الكورسات للمدرس"):
+        df_courses = pd.DataFrame(get_sheet_records("Courses"))
+        if df_courses.empty:
+            st.info("لا توجد كورسات حالياً.")
+        else:
+            for col in COURSES_HEADERS:
+                if col not in df_courses.columns:
+                    df_courses[col] = ""
+
+            course_options = [
+                f"{str(r.get('Course_Name', '')).strip() or 'كورس'}"
+                for _, r in df_courses.iterrows()
+            ]
+            course_idx = st.selectbox(
+                "اختر الكورس",
+                list(range(len(course_options))),
+                format_func=lambda i: course_options[i],
+                key=f"{section_key}_teacher_course_select",
+            )
+            course_row = df_courses.iloc[course_idx]
+
+            with st.form(f"{section_key}_teacher_course_edit"):
+                cc1, cc2 = st.columns(2)
+                with cc1:
+                    c_name = st.text_input("اسم الكورس", value=str(course_row.get("Course_Name", "")))
+                    c_schedule = st.text_input("مواعيد الكورس", value=str(course_row.get("Schedule", "")))
+                with cc2:
+                    c_teacher = st.text_input("المدرس المسؤول", value=teacher_username)
+                    status_opts = ["متاح", "مغلق"]
+                    current_status = str(course_row.get("Status", "متاح")).strip()
+                    c_status = st.selectbox(
+                        "الحالة",
+                        status_opts,
+                        index=status_opts.index(current_status) if current_status in status_opts else 0,
+                    )
+
+                if st.form_submit_button("💾 حفظ مواعيد/بيانات الكورس"):
+                    try:
+                        wks = sh.worksheet("Courses")
+                        row_num = course_idx + 2
+                        wks.update(f"B{row_num}:H{row_num}", [[
+                            c_name.strip(),
+                            str(course_row.get("Description", "")).strip(),
+                            str(course_row.get("Image_URL", "")).strip(),
+                            c_teacher.strip(),
+                            c_schedule.strip(),
+                            str(course_row.get("Price", "")).strip(),
+                            c_status,
+                        ]])
+                        st.cache_data.clear()
+                        st.success("تم تحديث الكورس بنجاح.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"خطأ في تحديث الكورس: {str(e)}")
+
+    with st.expander("📚 إضافة/حذف كورس"):
+        render_courses_management(f"{section_key}_courses")
+
+
 def admin_page():
     st.title("👨‍💼 لوحة تحكم الأدمن")
-    tab1, tab2, tab3, tab4 = st.tabs(["إدارة الطلاب", "إضافة مدرس/مساعد", "📚 الكورسات", "التقارير العامة"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["إدارة الطلاب", "👨‍🏫 إدارة المدرسين", "إضافة مدرس/مساعد", "📚 الكورسات", "التقارير العامة"])
     with tab1:
         st.info("الأدمن يمكنه إضافة وحذف وتعديل الطلاب")
         render_add_student_form("add_student_admin")
@@ -1359,6 +1604,9 @@ def admin_page():
                 st.error(f"خطأ في تحميل المستخدمين: {str(e)}")
 
     with tab2:
+        render_teacher_management_section("admin_teachers")
+
+    with tab3:
         st.info("إنشاء حسابات المدرسين والمساعدين مع إنشاء شيت خاص لكل حساب")
 
         with st.form("add_staff_user"):
@@ -1405,10 +1653,10 @@ def admin_page():
                     except Exception as e:
                         st.error(f"خطأ في إنشاء الحساب: {str(e)}")
 
-    with tab3:
+    with tab4:
         render_courses_management("admin_courses")
 
-    with tab4:
+    with tab5:
         st.info("التقارير العامة (قيد التطوير)")
 
 def assistant_page():
@@ -1461,13 +1709,13 @@ def assistant_page():
         else:
             render_session_tracking(df_students, "assistant_session", "Assistant")
 
-    with tab4:
+    with tab5:
         st.subheader("سجل الحضور والغياب")
         if not db_connected or sh is None:
             st.warning("قاعدة البيانات غير متصلة.")
         else:
             try:
-                df_att = pd.DataFrame(get_sheet_records("Attendance"))
+                df_att = get_attendance_df()
                 if df_att.empty:
                     st.info("لا يوجد سجل حضور حتى الآن.")
                 else:
@@ -1497,7 +1745,7 @@ def assistant_page():
                 with cal_c2:
                     sel_year = st.number_input("السنة", min_value=2020, max_value=2030,
                                                value=datetime.now().year, key="asst_cal_year")
-                df_att_cal = pd.DataFrame(get_sheet_records("Attendance"))
+                df_att_cal = get_attendance_df()
                 df_stu_cal = get_students_df()
                 if not df_att_cal.empty and "Session_Date" in df_att_cal.columns:
                     df_att_cal["Session_Date"] = pd.to_datetime(df_att_cal["Session_Date"], errors="coerce")
