@@ -4,6 +4,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 from datetime import datetime
 import re
+from urllib.parse import quote
 
 USERS_HEADERS = ["Username", "Password", "Role", "Full_Name", "Phone", "Created_At", "Sheet_Name"]
 STUDENTS_HEADERS = [
@@ -280,7 +281,8 @@ ROUNDS_CONFIG = {
 def send_wa(phone, msg):
     # تنظيف الرقم (تأكد يبدأ بـ 20 لمصر)
     if not phone.startswith('20'): phone = '20' + phone
-    url = f"https://wa.me/{phone}?text={msg.replace(' ', '%20')}"
+    # Encode full text so Arabic and special characters render correctly.
+    url = f"https://wa.me/{phone}?text={quote(str(msg), safe='')}"
     return url
 
 
